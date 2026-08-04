@@ -1,0 +1,11 @@
+# AI 内容运营工作台 - 后端依赖
+# 安装：pip install -r requirements.txt
+#
+# 上限锁定说明：云端每次构建都会重新装依赖，不加上限的话某天上游发大版本
+# 就可能把线上构建搞挂。这里锁到下一个大版本之前，既能拿补丁又不会被断更。
+fastapi>=0.110,<1.0
+uvicorn[standard]>=0.27,<1.0
+pydantic>=2.5,<3.0
+requests>=2.31,<3.0
+python-multipart>=0.0.9,<1.0   # 数据分析页文件上传
+openpyxl>=3.1,<4.0             # 解析 .xlsx 数据文件

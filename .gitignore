@@ -1,0 +1,47 @@
+# ===================== 环境变量 / 密钥（最重要，别动）=====================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ===================== 数据目录（含真实 API Key，绝不提交）=====================
+# 只忽略目录内容、保留目录本身，这样 .gitkeep 的反选规则才会生效
+data/*
+backend/data/*
+!backend/data/.gitkeep
+
+# ===================== 依赖 =====================
+node_modules/
+.pnpm-store/
+.yarn/
+venv/
+.venv/
+
+# ===================== Next.js / 前端 =====================
+.next/
+out/
+.turbo/
+.vercel/
+*.tsbuildinfo
+next-env.d.ts
+
+# ===================== Python / 后端 =====================
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# ===================== 日志 / 临时产物 =====================
+*.log
+_api_probe.py
+_check_secrets.py
+page_check.html
+layout_check.css
+
+# ===================== 编辑器 / 系统 =====================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

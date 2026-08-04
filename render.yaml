@@ -1,0 +1,31 @@
+# Render 部署蓝图（Blueprint）
+# 用法：Render → New → Blueprint → 选中本仓库，会自动按这里的配置建服务。
+# 也可以不用它，在 Render 界面手动新建 Web Service，参数照抄下面的值。
+#
+# 关键点：backend/main.py 用的是包内相对导入（from .routers import ...），
+# 所以 rootDir 必须是仓库根目录，启动模块写成 backend.main:app。
+# 如果把 rootDir 设成 backend，会报 ImportError: attempted relative import。
+services:
+  - type: web
+    name: content-workbench-backend
+    runtime: python
+    plan: free
+    rootDir: .
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      # 下面这些留空，在 Render 控制台里手动填，避免密钥进仓库
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: SERPAPI_KEY
+        sync: false
+      - key: WX_APPID
+        sync: false
+      - key: WX_SECRET
+        sync: false
+      # 前端 Vercel 域名，部署完前端后回填，多个用英文逗号分隔
+      - key: FRONTEND_URL
+        sync: false
