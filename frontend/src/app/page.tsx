@@ -18,7 +18,7 @@ import {
   Clock,
   Loader2,
 } from "lucide-react";
-import { api, friendlyMessage } from "@/lib/api";
+import { api, friendlyMessage, API_BASE } from "@/lib/api";
 import type { HistoryTask, QueueStats } from "@/lib/types";
 import { PageShell, PageHeader } from "@/components/layout/PageShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,6 +28,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
 import { TaskStatusBadge, fmtTime } from "@/components/tasks/TaskCard";
+
+// 后端是否跑在本机：决定连不上时提示「启动后端」还是「等待云端唤醒」
+const IS_LOCAL_BACKEND = /^https?:\/\/(localhost|127\.0\.0\.1)/.test(API_BASE);
 
 const QUICK_LINKS = [
   {
@@ -147,10 +150,17 @@ export default function DashboardPage() {
         <div className="mt-4 animate-fade-in rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           <div className="flex flex-wrap items-center gap-2">
             <Activity className="h-4 w-4 shrink-0" />
-            <span>无法连接后端（http://localhost:8000）。请先启动后端：</span>
-            <code className="rounded bg-black/30 px-1.5 py-0.5 text-xs">
-              uvicorn backend.main:app --reload --port 8000
-            </code>
+            <span>无法连接后端（{API_BASE}）。</span>
+            {IS_LOCAL_BACKEND ? (
+              <>
+                <span>请先启动后端：</span>
+                <code className="rounded bg-black/30 px-1.5 py-0.5 text-xs">
+                  uvicorn backend.main:app --reload --port 8000
+                </code>
+              </>
+            ) : (
+              <span>免费实例休眠后首次唤醒约需 30–60 秒，稍等片刻点重试。</span>
+            )}
             <Button
               size="xs"
               variant="outline"

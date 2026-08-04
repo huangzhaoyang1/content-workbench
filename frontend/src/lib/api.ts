@@ -1,5 +1,6 @@
 // 轻量 API 客户端：统一指向后端地址、处理 JSON 与错误。
-// 后端地址通过 NEXT_PUBLIC_API_BASE 配置，默认 http://localhost:8000。
+// 后端地址通过 NEXT_PUBLIC_API_URL（或旧名 NEXT_PUBLIC_API_BASE）配置，
+// 都没设置时默认 http://localhost:8000。
 import type {
   AnalyticsDataset,
   AnalyticsResult,
@@ -83,7 +84,7 @@ export function friendlyMessage(err: unknown, fallback = "操作失败，请重�
   }
   if (err instanceof Error) {
     if (/failed to fetch|networkerror|load failed/i.test(err.message)) {
-      return "网络连接失败，请检查后端服务是否已启动（默认 http://localhost:8000）";
+      return `网络连接失败，请检查后端服务是否可用（当前后端：${API_BASE}）。云端免费实例休眠后首次唤醒约需 30–60 秒，可稍后重试。`;
     }
     return err.message || fallback;
   }
