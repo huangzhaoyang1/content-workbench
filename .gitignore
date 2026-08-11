@@ -45,3 +45,17 @@ layout_check.css
 .idea/
 .DS_Store
 Thumbs.db
+
+# ===================== 体检新增：无关目录 / 临时脚本 / 覆盖率产物 =====================
+.coverage
+*.coverage
+pixel-block-world/
+coze-navigator-polyfill.js
+mbeditor-themes-demo.html
+project-optimization-report/
+.trae-html-share-packages/
+_tmp_*.py
+_fix_imports.py
+backend/_tmp_fmt_test.py
+frontend/.next/
+frontend/tsconfig.tsbuildinfo

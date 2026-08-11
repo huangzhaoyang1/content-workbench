@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ArrowDownUp, Plus } from "lucide-react";
+import { ArrowDownUp, Plus, Trash2 } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type { AnalyticsRankItem, RankingKey } from "@/lib/types";
 
 interface RankingTableProps {
@@ -19,6 +20,8 @@ interface RankingTableProps {
   /** 当前榜单主指标，决定默认排序列。 */
   metric: RankingKey;
   onPick: (item: AnalyticsRankItem) => void;
+  /** 提供后，每行出现删除按钮，点击弹确认框，确认后回调删除。 */
+  onDelete?: (item: AnalyticsRankItem) => void | Promise<void>;
 }
 
 type SortKey = "rank" | "reads" | "likes" | "shares" | "like_rate";
@@ -41,15 +44,29 @@ function fmt(v: number | null, suffix = ""): string {
   return `${v.toLocaleString("zh-CN")}${suffix}`;
 }
 
-/** 榜单表格：支持点列头排序，每行可加入选题参考。 */
-export function RankingTable({ items, metric, onPick }: RankingTableProps) {
+/** 榜单表格：支持点列头排序，每行可加入选题参考 / 删除单条数据。 */
+export function RankingTable({ items, metric, onPick, onDelete }: RankingTableProps) {
   const [sortKey, setSortKey] = React.useState<SortKey>("rank");
   const [desc, setDesc] = React.useState(false);
+  const [pending, setPending] = React.useState<AnalyticsRankItem | null>(null);
+  const [deleting, setDeleting] = React.useState(false);
+  const canDelete = !!onDelete;
 
   React.useEffect(() => {
     setSortKey("rank");
     setDesc(false);
   }, [metric]);
+
+  const confirmDelete = async () => {
+    if (!pending || !onDelete) return;
+    setDeleting(true);
+    try {
+      await onDelete(pending);
+    } finally {
+      setDeleting(false);
+      setPending(null);
+    }
+  };
 
   const sorted = React.useMemo(() => {
     const arr = [...items];
@@ -92,8 +109,9 @@ export function RankingTable({ items, metric, onPick }: RankingTableProps) {
   );
 
   return (
-    <div className="rounded-xl border border-border">
-      <Table>
+    <>
+      <div className="rounded-xl border border-border">
+        <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             <TableHead className="w-14">
@@ -108,7 +126,7 @@ export function RankingTable({ items, metric, onPick }: RankingTableProps) {
                 </div>
               </TableHead>
             ))}
-            <TableHead className="w-32 text-right">操作</TableHead>
+            <TableHead className="w-44 text-right">操作</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -138,15 +156,43 @@ export function RankingTable({ items, metric, onPick }: RankingTableProps) {
                   : `${it.like_rate}%`}
               </TableCell>
               <TableCell className="text-right">
-                <Button size="xs" variant="outline" onClick={() => onPick(it)}>
-                  <Plus className="h-3 w-3" />
-                  加入选题参考
-                </Button>
+                <div className="flex items-center justify-end gap-1.5">
+                  <Button size="xs" variant="outline" onClick={() => onPick(it)}>
+                    <Plus className="h-3 w-3" />
+                    加入选题参考
+                  </Button>
+                  {canDelete && (
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      aria-label="删除这条数据"
+                      onClick={() => setPending(it)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                </div>
               </TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
     </div>
+    <ConfirmDialog
+      open={pending !== null}
+      title="删除这条数据？"
+      description={
+        pending
+          ? `确定删除《${pending.title}》这篇文章的数据吗？删除后不可恢复。`
+          : ""
+      }
+      confirmText="删除"
+      destructive
+      loading={deleting}
+      onConfirm={confirmDelete}
+      onCancel={() => !deleting && setPending(null)}
+    />
+    </>
   );
 }

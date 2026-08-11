@@ -4,6 +4,7 @@ import "./globals.css";
 import { cn } from "@/lib/utils";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { ToastProvider } from "@/components/ui/toast";
+import { AuthGate } from "@/components/auth/AuthGate";
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -32,12 +33,14 @@ export default function RootLayout({
         className={`${geistMono.variable} antialiased`}
       >
         <ToastProvider>
-          <div className="flex h-screen overflow-hidden bg-background text-foreground">
-            <Sidebar />
-            <main className="flex-1 overflow-auto pt-14 lg:pt-0">
-              {children}
-            </main>
-          </div>
+          <AuthGate>
+            <div className="flex h-screen overflow-hidden bg-background text-foreground">
+              <Sidebar />
+              <main className="flex-1 overflow-auto pt-14 lg:pt-0">
+                {children}
+              </main>
+            </div>
+          </AuthGate>
         </ToastProvider>
       </body>
     </html>

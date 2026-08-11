@@ -9,3 +9,38 @@ pydantic>=2.5,<3.0
 requests>=2.31,<3.0
 python-multipart>=0.0.9,<1.0   # 数据分析页文件上传
 openpyxl>=3.1,<4.0             # 解析 .xlsx 数据文件
+
+# ==========================================================================
+# 本地 OCR 驱动（截图识别）。两种本地方案二选一即可，装谁用谁：
+#   配置 → 高级 → 「OCR 识别方式」里切换（还有第三种：云端视觉模型，无需本地依赖）。
+# ==========================================================================
+
+# 方案一：Tesseract OCR（推荐，稳定兼容）
+# Tesseract 本体是独立的 C++ 程序，跟 Python 版本无关，Python 侧只装一个很轻的封装。
+# ⚠️ 必须先装 Tesseract 本体，pip 装 pytesseract 是不够的：
+#   Windows 安装包 → https://github.com/UB-Mannheim/tesseract/wiki
+#   安装时务必在「Additional language data」里勾选 Chinese (Simplified) 中文语言包，
+#   默认装到 C:\Program Files\Tesseract-OCR\，不会自动加进 PATH，
+#   所以在「配置 → 高级」里填 tesseract.exe 完整路径，点「检测」确认可用。
+# 模型（traineddata）随安装包一起装好，识别全程离线、无需联网。
+pytesseract>=0.3.10,<1.0
+pillow>=10.0,<12.0             # 图片预处理（灰度/放大/拉对比度）
+
+# 方案二：PaddleOCR（准确率略高，但依赖较重）
+# ⚠️ paddlepaddle 官方轮子目前只覆盖到 Python 3.11，3.12/3.13 上会装不上，
+#   所以这里加了环境标记：只在 Python < 3.12 时安装，高版本自动跳过（不会让整条
+#   pip install 失败），高版本请用上面的 Tesseract 方案。
+# ⚠️ PaddleOCR 首次真正识别一张图时，会自动联网下载检测+识别模型（几百 MB），
+#   需要联网；下载完成后纯本地、离线可用。import 阶段不会触发下载。
+# CPU 环境用 paddlepaddle（不带 -gpu）；如需 GPU 加速可换成 paddlepaddle-gpu。
+paddlepaddle>=2.6.0,<3.0; python_version < "3.12"
+paddleocr>=2.7.0,<3.0; python_version < "3.12"
+
+emoji>=2.0,<3.0              # 文章质量检测中的 emoji 识别
+
+# ==========================================================================
+# 测试依赖（开发环境用，云端部署可不装）
+# ==========================================================================
+pytest>=7.0,<9.0
+pytest-cov>=4.0,<6.0
+httpx>=0.24,<1.0       # FastAPI TestClient 的依赖

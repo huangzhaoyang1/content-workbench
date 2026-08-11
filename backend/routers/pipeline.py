@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from ..services import pipeline
+from ..services.content import pipeline
 
 router = APIRouter(tags=["pipeline"])
 
@@ -15,6 +15,12 @@ class PipelineStartReq(BaseModel):
     extra: str = ""
     references: str = ""   # 热点素材链接，英文逗号分隔
     platform: str = "wechat"
+    review: bool = False   # True=存为待审核(不推送)，审核后再发布
+
+
+class PipelineIssueReq(BaseModel):
+    issue: int
+    cover_label: str = ""   # 封面期号标识；非空时覆盖默认「第N期」（合集场景由用户手动指定）
 
 
 @router.get("/pipeline/availability")
@@ -25,7 +31,7 @@ def pipeline_availability() -> dict:
 
 @router.post("/pipeline/start")
 def pipeline_start(body: PipelineStartReq) -> dict:
-    """启动流水线，返回 {task_id, issue}。"""
+    """启动流水线，返回 {task_id, issue}。review=True 时存为待审核不推送。"""
     if not body.topic or not body.topic.strip():
         raise HTTPException(status_code=422, detail="topic 不能为空")
     try:
@@ -35,10 +41,26 @@ def pipeline_start(body: PipelineStartReq) -> dict:
             extra=body.extra,
             references=body.references,
             platform=body.platform,
+            review=body.review,
         )
     except pipeline.PipelineUnavailable as e:
         # 503：环境缺脚本导致功能不可用，不是代码 bug，前端直接展示这句话
         raise HTTPException(status_code=503, detail=str(e)) from e
+
+
+@router.post("/pipeline/publish")
+def pipeline_publish(body: PipelineIssueReq) -> dict:
+    """把已存为「待审核」的某期推送到公众号，返回 {task_id, issue}。"""
+    try:
+        return pipeline.publish(body.issue, cover_label=body.cover_label)
+    except pipeline.PipelineUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+
+
+@router.post("/pipeline/discard")
+def pipeline_discard(body: PipelineIssueReq) -> dict:
+    """把「待审核」的某期标记为放弃（只改本地状态，不调微信）。"""
+    return pipeline.discard(body.issue)
 
 
 @router.get("/pipeline/status/{task_id}")

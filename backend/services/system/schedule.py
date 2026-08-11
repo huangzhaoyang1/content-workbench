@@ -12,7 +12,7 @@ import threading
 import uuid
 from datetime import datetime, timedelta
 
-from ..config import DATA_DIR
+from .config import DATA_DIR
 from . import queue as task_queue
 
 _STORE = DATA_DIR / "schedule.json"

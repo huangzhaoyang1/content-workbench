@@ -63,6 +63,8 @@ export interface QueueDraft {
   topic: string;
   angle?: string;
   extra?: string;
+  /** 关联选题库条目 id，带入队列后用于自动翻转选题状态。 */
+  topic_id?: string;
 }
 
 export const queueDraft = {

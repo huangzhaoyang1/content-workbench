@@ -9,10 +9,12 @@ import {
   Lightbulb,
   XCircle,
   HelpCircle,
+  Trash2,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type { HistoryStatus, HistoryTask } from "@/lib/types";
 
 const STATUS_META: Record<
@@ -21,7 +23,8 @@ const STATUS_META: Record<
 > = {
   ok: { label: "成功", variant: "success", icon: CheckCircle2 },
   error: { label: "失败", variant: "destructive", icon: XCircle },
-  running: { label: "进行中", variant: "warning", icon: Clock },
+  running: { label: "运行中", variant: "warning", icon: Clock },
+  waiting: { label: "等待中", variant: "muted", icon: HelpCircle },
   unknown: { label: "未知", variant: "muted", icon: HelpCircle },
 };
 
@@ -52,6 +55,8 @@ export function fmtTime(v: string | null): string {
 
 export function platformLabel(p: string): string {
   if (p === "wechat") return "微信公众号";
+  if (p === "xiaohongshu") return "小红书";
+  if (p === "douyin") return "抖音";
   return p || "其他";
 }
 
@@ -60,28 +65,75 @@ interface TaskCardProps {
   onView: (issue: number) => void;
   onReuse: (task: HistoryTask) => void;
   onEnqueue: (task: HistoryTask) => void;
+  onDelete: (task: HistoryTask) => Promise<void>;
   enqueuing?: boolean;
+  selected?: boolean;
+  onToggle?: (issue: number) => void;
 }
 
-/** 历史任务卡片：期号 + 标题 + 状态 + 三个快捷动作。 */
+/** 历史任务卡片：期号 + 标题 + 状态 + 四个快捷动作（含删除）。 */
 export function TaskCard({
   task,
   onView,
   onReuse,
   onEnqueue,
+  onDelete,
   enqueuing = false,
+  selected = false,
+  onToggle,
 }: TaskCardProps) {
+  const [pending, setPending] = React.useState<HistoryTask | null>(null);
+  const [deleting, setDeleting] = React.useState(false);
+
+  const confirmDelete = async () => {
+    if (!pending) return;
+    setDeleting(true);
+    try {
+      await onDelete(pending);
+      setPending(null);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
+    <>
     <Card className="transition-colors hover:border-muted-foreground/30">
       <CardContent className="p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
+          {onToggle && (
+            <input
+              type="checkbox"
+              className="mt-1 h-4 w-4 shrink-0 cursor-pointer rounded border-border accent-primary"
+              checked={selected}
+              onChange={() => onToggle(task.issue)}
+              aria-label={`选择第 ${task.issue} 期`}
+            />
+          )}
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="outline">第 {task.issue} 期</Badge>
               <TaskStatusBadge status={task.status} />
               <Badge variant="secondary">{platformLabel(task.platform)}</Badge>
               {task.draft_status && (
-                <Badge variant="muted">{task.draft_status}</Badge>
+                <Badge
+                  variant={
+                    task.draft_status === "PENDING_REVIEW" ? "warning" : "muted"
+                  }
+                >
+                  {task.draft_status === "PENDING_REVIEW"
+                    ? "待审核"
+                    : task.draft_status}
+                </Badge>
+              )}
+              {task.tags && task.tags.length > 0 && (
+                <span className="inline-flex flex-wrap gap-1 align-middle">
+                  {task.tags.map((t) => (
+                    <Badge key={t} variant="outline" className="text-[10px]">
+                      {t}
+                    </Badge>
+                  ))}
+                </span>
               )}
             </div>
             <p
@@ -130,9 +182,34 @@ export function TaskCard({
               <ListPlus className="h-3 w-3" />
               加入队列
             </Button>
+            <Button
+              size="xs"
+              variant="ghost"
+              className="text-destructive hover:bg-destructive/10"
+              onClick={() => setPending(task)}
+            >
+              <Trash2 className="h-3 w-3" />
+              删除
+            </Button>
           </div>
         </div>
       </CardContent>
     </Card>
+
+    <ConfirmDialog
+      open={pending !== null}
+      title="移入回收站？"
+      description={
+        pending
+          ? `确定把《${pending.title}》（第 ${pending.issue} 期）移入回收站吗？可在回收站里恢复。`
+          : ""
+      }
+      confirmText="删除"
+      destructive
+      loading={deleting}
+      onConfirm={confirmDelete}
+      onCancel={() => !deleting && setPending(null)}
+    />
+    </>
   );
 }

@@ -26,6 +26,7 @@ import {
 import { api, friendlyMessage } from "@/lib/api";
 import { topicSeeds } from "@/lib/seed";
 import type {
+  DataInsight,
   HistoryDetail,
   HotspotItem,
   PipelineStartResult,
@@ -53,6 +54,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Progress } from "@/components/ui/progress";
 import { Steps, type StepDef } from "@/components/ui/steps";
+import { ConfirmPublishDialog } from "@/components/tasks/ConfirmPublishDialog";
 
 type Phase = "idle" | "generating" | "ready" | "producing" | "running" | "done";
 
@@ -74,6 +76,131 @@ const PIPELINE_STAGES: { key: string; label: string; match: RegExp }[] = [
   { key: "publish", label: "推送草稿", match: /\[OK\]\s*推送/ },
 ];
 
+/** 顶部数据洞察卡片：3 个内容方向 + 3 种标题风格 + 可执行建议。 */
+function DataInsightCard({ data }: { data: DataInsight }) {
+  if (!data.available) {
+    return (
+      <Card className="mt-5 border-dashed">
+        <CardContent className="flex flex-wrap items-center gap-2 p-4 text-sm">
+          <BarChart3 className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="text-muted-foreground">{data.reason}</span>
+          <LinkButton
+            href="/analytics"
+            variant="outline"
+            size="sm"
+            className="ml-auto"
+          >
+            去导入数据
+            <ArrowRight className="h-3.5 w-3.5" />
+          </LinkButton>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const ds = data.dataset;
+  return (
+    <Card className="mt-5 animate-fade-in border-indigo-500/40">
+      <CardHeader className="pb-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <BarChart3 className="h-4 w-4 text-indigo-400" />
+          <CardTitle className="text-base">数据洞察</CardTitle>
+          <span className="text-xs text-muted-foreground">{data.summary}</span>
+          {ds?.total_articles != null && (
+            <div className="ml-auto flex flex-wrap gap-1.5">
+              <Badge variant="secondary">共 {ds.total_articles} 篇</Badge>
+              {ds.avg_reads != null && (
+                <Badge variant="muted">平均 {ds.avg_reads} 阅读</Badge>
+              )}
+              {ds.max_reads != null && (
+                <Badge variant="outline">最高 {ds.max_reads}</Badge>
+              )}
+            </div>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4 text-sm">
+        {/* 3 个内容方向 */}
+        {data.directions.length > 0 && (
+          <div>
+            <div className="mb-1.5 text-xs font-medium text-muted-foreground">
+              下一篇可以写的 3 个方向
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {data.directions.map((d, i) => (
+                <div
+                  key={i}
+                  className="rounded-lg border border-border bg-muted/30 p-2.5"
+                >
+                  <div className="font-medium leading-snug">{d.name}</div>
+                  {d.evidence && (
+                    <div className="mt-1 text-[11px] text-muted-foreground">
+                      {d.evidence}
+                    </div>
+                  )}
+                  {d.angle && (
+                    <div className="mt-1 text-[11px] text-indigo-400/90">
+                      写法：{d.angle}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 3 种标题风格 */}
+        {data.title_styles.length > 0 && (
+          <div>
+            <div className="mb-1.5 text-xs font-medium text-muted-foreground">
+              这个号更吃得开的 3 种标题风格
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {data.title_styles.map((s, i) => (
+                <div
+                  key={i}
+                  className="rounded-lg border border-border bg-muted/30 p-2.5"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium">{s.name}</span>
+                    <Badge variant="secondary" className="text-[10px]">
+                      {s.avg_reads} 阅读
+                    </Badge>
+                  </div>
+                  {s.lift != null && (
+                    <div className="mt-1 text-[11px] text-emerald-500">
+                      比大盘高 {Math.round((s.lift - 1) * 100)}%
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · {s.count} 篇样本
+                      </span>
+                    </div>
+                  )}
+                  <div className="mt-1 text-[11px] text-muted-foreground">
+                    {s.tip}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 建议 */}
+        {data.advice.length > 0 && (
+          <ul className="space-y-1 rounded-lg border border-border bg-muted/30 p-2.5 text-[13px]">
+            {data.advice.map((a, i) => (
+              <li key={i} className="flex gap-2">
+                <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-indigo-400" />
+                <span className="text-muted-foreground">{a}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function TopicPage() {
   const { toast } = useToast();
   const router = useRouter();
@@ -85,6 +212,10 @@ export default function TopicPage() {
   const [enqueuing, setEnqueuing] = useState<string | null>(null);
   const [genError, setGenError] = useState<string | null>(null);
 
+  // 顶部数据洞察（自动读历史数据，进来就拉）
+  const [insight, setInsight] = useState<DataInsight | null>(null);
+  const [insightLoading, setInsightLoading] = useState(true);
+
   // 生产表单
   const [formTopic, setFormTopic] = useState("");
   const [formAngle, setFormAngle] = useState("");
@@ -94,6 +225,15 @@ export default function TopicPage() {
     topic?: string;
     angle?: string;
   }>({});
+  /** 是否以待审核模式生产（不推送，审核后再发布） */
+  const [formReview, setFormReview] = useState(false);
+
+  // 待审核的发布/放弃
+  const [publishing, setPublishing] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [discarding, setDiscarding] = useState(false);
+  /** 确认发布前的二次确认弹窗（让用户手动指定封面期号标识） */
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   // 流水线状态
   const [task, setTask] = useState<PipelineStatus | null>(null);
@@ -108,6 +248,19 @@ export default function TopicPage() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [showArticle, setShowArticle] = useState(false);
 
+  // 轮询发布态期间若组件卸载，停止 setState / 清掉定时器，避免内存泄漏与控制台告警。
+  const mountedRef = useRef(true);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+  }, []);
+
   // 读取热点素材页带入的选中素材 + 数据分析/历史任务带来的选题参考
   useEffect(() => {
     const raw = sessionStorage.getItem("selected_hotspots");
@@ -118,8 +271,32 @@ export default function TopicPage() {
         /* ignore */
       }
     }
-    setSeeds(topicSeeds.all());
+    const initialSeeds = topicSeeds.all();
+    setSeeds(initialSeeds);
+    if (initialSeeds.length > 0) {
+      toast(`已从数据分析带入 ${initialSeeds.length} 条选题参考，生成选题时会作为依据`, "info");
+    }
     setPhase("ready");
+  }, []);
+
+  // 进来就拉一次数据洞察（没有数据也不报错，只显示引导）
+  useEffect(() => {
+    let active = true;
+    setInsightLoading(true);
+    api
+      .topicDataInsight()
+      .then((d) => {
+        if (active) setInsight(d);
+      })
+      .catch(() => {
+        /* 拉不到就不显示，不影响选题 */
+      })
+      .finally(() => {
+        if (active) setInsightLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const removeSeed = (topic: string) => setSeeds(topicSeeds.remove(topic));
@@ -150,16 +327,14 @@ export default function TopicPage() {
           source: h.source,
           url: h.url,
         })),
+        // 往期复盘 / 数据选题参考作为显式方向依据（seeds）。
+        // data_insight 不手动传：后端会读历史数据自动补上数据洞察。
         data_suggestions: seeds.map((s) => ({
           name: s.topic,
           angle: s.angle ?? "",
           evidence: s.note ?? "",
           from: s.from,
         })),
-        data_insight:
-          seeds.length > 0
-            ? `已有 ${seeds.length} 条来自数据复盘/往期产出的选题参考，请优先围绕这些方向展开。`
-            : null,
       });
       setTopics(res.topics);
       setPhase("ready");
@@ -228,6 +403,7 @@ export default function TopicPage() {
         extra: formExtra,
         references: refs,
         platform: formPlatform,
+        review: formReview,
       });
       setTask({
         task_id: res.task_id,
@@ -268,6 +444,57 @@ export default function TopicPage() {
     },
     []
   );
+
+  /** 待审核 → 确认发布：推送到公众号，并轮询发布任务状态。 */
+  const handleConfirmPublish = async (coverLabel = "") => {
+    if (!task) return;
+    setPublishing(true);
+    setPublishError(null);
+    try {
+      const r = await api.publishPipeline(task.issue, coverLabel);
+      await new Promise<void>((resolve) => {
+        pollTimerRef.current = setInterval(async () => {
+          try {
+            const st = await api.pipelineStatus(r.task_id);
+            if (st.status === "success" || st.status === "failed") {
+              if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+              pollTimerRef.current = null;
+              resolve();
+            }
+          } catch {
+            if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+            pollTimerRef.current = null;
+            resolve();
+          }
+        }, 1500);
+      });
+      // 轮询期间组件已卸载：不再更新已卸载组件状态 / 弹 toast，防止内存泄漏与控制台报错。
+      if (!mountedRef.current) return;
+      await loadDetail(task.issue);
+      toast("已推送到公众号草稿箱", "success");
+    } catch (e) {
+      const msg = friendlyMessage(e, "发布失败");
+      setPublishError(msg);
+      toast(msg, "error");
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  /** 待审核 → 放弃：只改本地状态，不调微信。 */
+  const handleDiscard = async () => {
+    if (!task) return;
+    setDiscarding(true);
+    try {
+      await api.discardPipeline(task.issue);
+      await loadDetail(task.issue);
+      toast("已标记为放弃（未推送）", "success");
+    } catch (e) {
+      toast(friendlyMessage(e, "操作失败"), "error");
+    } finally {
+      setDiscarding(false);
+    }
+  };
 
   // 轮询流水线状态
   const poll = useCallback(
@@ -430,6 +657,20 @@ export default function TopicPage() {
           />
         </CardContent>
       </Card>
+
+      {/* 数据洞察（自动读历史数据，无数据则引导去导入） */}
+      {insightLoading ? (
+        <Card className="mt-5">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              正在读取历史数据洞察…
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        insight && <DataInsightCard data={insight} />
+      )}
 
       {/* 数据分析 / 历史任务带来的选题参考 */}
       {seeds.length > 0 && (
@@ -700,6 +941,19 @@ export default function TopicPage() {
                 <option value="other">其他</option>
               </Select>
             </div>
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-amber-500"
+                checked={formReview}
+                onChange={(e) => setFormReview(e.target.checked)}
+              />
+              <span>
+                先存为
+                <span className="font-medium text-amber-500">待审核</span>
+                （不推送，审核后再发布）
+              </span>
+            </label>
             <div className="flex flex-col gap-2 sm:flex-row">
               <Button
                 onClick={startPipeline}
@@ -921,6 +1175,59 @@ export default function TopicPage() {
                         )}
                       </div>
                     ) : null}
+
+                    {/* 待审核：审核后一键发布 / 放弃 */}
+                    {detail?.draft_status === "PENDING_REVIEW" && (
+                      <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
+                        <div className="flex flex-wrap items-center gap-2 text-sm">
+                          <Badge variant="warning">
+                            <Clock className="mr-1 h-3 w-3" />
+                            待审核
+                          </Badge>
+                          <span className="text-xs text-muted-foreground">
+                            文章与封面已就绪但未推送。审核正文后点「确认发布」推到公众号草稿箱。
+                          </span>
+                        </div>
+                        {publishError && (
+                          <p className="mt-2 text-xs text-destructive">
+                            {publishError}
+                          </p>
+                        )}
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            onClick={() => setConfirmOpen(true)}
+                            disabled={publishing}
+                          >
+                            {publishing ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <CheckCircle2 className="h-4 w-4" />
+                            )}
+                            {publishing ? "发布中…" : "确认发布"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={handleDiscard}
+                            disabled={discarding}
+                          >
+                            {discarding ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <XCircle className="h-4 w-4" />
+                            )}
+                            {discarding ? "处理中…" : "放弃"}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    <ConfirmPublishDialog
+                      open={confirmOpen}
+                      issue={task?.issue ?? 0}
+                      onClose={() => setConfirmOpen(false)}
+                      onConfirm={handleConfirmPublish}
+                    />
 
                     <div className="mt-4 flex flex-wrap gap-2">
                       <LinkButton

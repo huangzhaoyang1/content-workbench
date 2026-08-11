@@ -4,8 +4,9 @@ from __future__ import annotations
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from ..config import load_config
-from ..services import hotspot, quota
+from ..services.system.config import load_config
+from ..services.integration import hotspot
+from ..services.system import quota
 
 router = APIRouter(tags=["hotspot"])
 

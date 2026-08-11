@@ -96,4 +96,15 @@
   html {
     @apply font-sans;
   }
+  /* 原生 <select> 的下拉弹层由操作系统/浏览器绘制，不吃父级 bg-transparent。
+     深色主题下若不显式指定，Windows Chrome 会渲染成「白底 + 继承的浅色文字」，
+     导致展开后除当前选中项外其余选项肉眼不可见（看起来像「只有一个选项」）。 */
+  select {
+    color-scheme: dark;
+  }
+  select option,
+  select optgroup {
+    background-color: var(--popover);
+    color: var(--popover-foreground);
+  }
 }

@@ -11,6 +11,8 @@ import {
   History,
   BarChart3,
   ListChecks,
+  Target,
+  Bookmark,
   Menu,
   X,
   type LucideIcon,
@@ -27,6 +29,8 @@ interface NavItem {
 const NAV: NavItem[] = [
   { href: "/", label: "概览", icon: LayoutDashboard, desc: "工作台总览" },
   { href: "/hotspot", label: "热点素材", icon: Flame, desc: "搜索与洞察" },
+  { href: "/dissect", label: "爆款拆解", icon: Target, desc: "抖音爆款 → 公众号" },
+  { href: "/douyin-sync", label: "抖音收藏同步", icon: Bookmark, desc: "主页/收藏夹 → 素材池" },
   { href: "/analytics", label: "数据分析", icon: BarChart3, desc: "复盘 · 找方向" },
   { href: "/topic", label: "选题与生产", icon: Lightbulb, desc: "生成选题 · 跑流水线" },
   { href: "/queue", label: "任务队列", icon: ListChecks, desc: "批量排期 · 定时" },

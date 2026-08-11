@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   BarChart3,
@@ -24,7 +24,11 @@ import type {
   AnalyticsRankItem,
   AnalyticsResult,
   AnalyticsSuggestion,
+  OcrArticle,
+  OcrStatus,
+  OcrSummary,
   RankingKey,
+  ScreenshotItem,
 } from "@/lib/types";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -46,6 +50,8 @@ import { PageShell, PageHeader } from "@/components/layout/PageShell";
 import { BarChart, LineChart, type ChartPoint } from "@/components/charts/mini-charts";
 import { UploadZone } from "@/components/analytics/UploadZone";
 import { RankingTable } from "@/components/analytics/RankingTable";
+import { ScreenshotZone } from "@/components/analytics/ScreenshotZone";
+import { OcrConfirmDialog } from "@/components/analytics/OcrConfirmDialog";
 
 const TIME_RANGES = ["近7天", "近30天", "全部"] as const;
 type TimeRange = (typeof TIME_RANGES)[number];
@@ -60,6 +66,35 @@ function num(v: number | null | undefined): string {
   if (v === null || v === undefined) return "—";
   return v.toLocaleString("zh-CN");
 }
+
+/** 按「标题 + 日期」去重，识别批里同一篇可能被多张截图重复抓到。 */
+function dedupArticles(list: OcrArticle[]): OcrArticle[] {
+  const seen = new Set<string>();
+  const out: OcrArticle[] = [];
+  for (const a of list) {
+    const key = `${a.title.trim().toLowerCase()}__${(a.date ?? "").trim().toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(a);
+  }
+  return out;
+}
+
+/** 账号级 summary 整体去重，避免确认框里出现重复 Badge。 */
+function dedupeSummaries(list: OcrSummary[]): OcrSummary[] {
+  const seen = new Set<string>();
+  const out: OcrSummary[] = [];
+  for (const s of list) {
+    const key = JSON.stringify(s);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
+}
+
+let screenshotSeq = 0;
+const nextScreenshotId = () => `shot-${Date.now().toString(36)}-${screenshotSeq++}`;
 
 export default function AnalyticsPage() {
   const { toast } = useToast();
@@ -76,8 +111,47 @@ export default function AnalyticsPage() {
   const [confirmClear, setConfirmClear] = useState(false);
   const [seedCount, setSeedCount] = useState(0);
 
+  // 截图识别导入相关状态
+  const [screenshots, setScreenshots] = useState<ScreenshotItem[]>([]);
+  const [ocrStatus, setOcrStatus] = useState<OcrStatus | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmArticles, setConfirmArticles] = useState<OcrArticle[]>([]);
+  const [confirmSummaries, setConfirmSummaries] = useState<OcrSummary[]>([]);
+  const [importing, setImporting] = useState(false);
+
+  const screenshotsRef = useRef<ScreenshotItem[]>([]);
+  screenshotsRef.current = screenshots;
+
+  const ocrBusy = screenshots.some((s) => s.status === "recognizing");
+  const readyCount = useMemo(
+    () =>
+      dedupArticles(
+        screenshots.filter((s) => s.status === "success").flatMap((s) => s.articles)
+      ).length,
+    [screenshots]
+  );
+
   useEffect(() => {
     setSeedCount(topicSeeds.all().length);
+  }, []);
+
+  // 进页面先探测视觉模型是否配置好，没配就提前在截图区提示
+  useEffect(() => {
+    let alive = true;
+    api
+      .ocrStatus()
+      .then((st) => alive && setOcrStatus(st))
+      .catch(() => alive && setOcrStatus(null));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // 卸载时回收所有缩略图 object URL，避免内存泄漏
+  useEffect(() => {
+    return () => {
+      screenshotsRef.current.forEach((s) => URL.revokeObjectURL(s.previewUrl));
+    };
   }, []);
 
   const runAnalyze = useCallback(
@@ -168,6 +242,125 @@ export default function AnalyticsPage() {
     }
   };
 
+  // ---------- 截图识别导入 ----------
+  const recognizeOne = useCallback(
+    async (item: ScreenshotItem) => {
+      setScreenshots((prev) =>
+        prev.map((s) =>
+          s.id === item.id ? { ...s, status: "recognizing", error: null } : s
+        )
+      );
+      try {
+        const res = await api.ocrUploadAnalytics(item.file);
+        setScreenshots((prev) =>
+          prev.map((s) =>
+            s.id === item.id
+              ? {
+                  ...s,
+                  status: "success",
+                  articles: res.articles ?? [],
+                  summary: res.summary ?? null,
+                  confidence: res.confidence ?? null,
+                  note: res.note ?? "",
+                }
+              : s
+          )
+        );
+      } catch (e) {
+        const msg = friendlyMessage(e, "识别失败");
+        setScreenshots((prev) =>
+          prev.map((s) =>
+            s.id === item.id ? { ...s, status: "failed", error: msg } : s
+          )
+        );
+      }
+    },
+    []
+  );
+
+  const handleAddScreenshots = useCallback(
+    (files: File[]) => {
+      const newItems: ScreenshotItem[] = files.map((file) => ({
+        id: nextScreenshotId(),
+        file,
+        previewUrl: URL.createObjectURL(file),
+        status: "pending",
+        error: null,
+        articles: [],
+        summary: null,
+        confidence: null,
+        note: "",
+      }));
+      setScreenshots((prev) => [...prev, ...newItems]);
+      newItems.forEach((it) => void recognizeOne(it));
+    },
+    [recognizeOne]
+  );
+
+  const handleRemoveScreenshot = useCallback((id: string) => {
+    setScreenshots((prev) => {
+      const target = prev.find((s) => s.id === id);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((s) => s.id !== id);
+    });
+  }, []);
+
+  const handleRetryScreenshot = useCallback(
+    (id: string) => {
+      const target = screenshots.find((s) => s.id === id);
+      if (target) void recognizeOne(target);
+    },
+    [screenshots, recognizeOne]
+  );
+
+  const handleClearScreenshots = useCallback(() => {
+    setScreenshots((prev) => {
+      prev.forEach((s) => URL.revokeObjectURL(s.previewUrl));
+      return [];
+    });
+    setConfirmOpen(false);
+    // 同步清空已识别结果，否则残留数据会在下次「查看识别结果」时闪现
+    setConfirmArticles([]);
+    setConfirmSummaries([]);
+  }, []);
+
+  const handleReviewScreenshots = useCallback(() => {
+    const succeeded = screenshots.filter((s) => s.status === "success");
+    const deduped = dedupArticles(succeeded.flatMap((s) => s.articles));
+    const summaries = dedupeSummaries(
+      succeeded.map((s) => s.summary).filter((x): x is OcrSummary => !!x)
+    );
+    setConfirmArticles(deduped);
+    setConfirmSummaries(summaries);
+    setConfirmOpen(true);
+  }, [screenshots]);
+
+  const handleConfirmImport = useCallback(
+    async (articles: OcrArticle[]) => {
+      setImporting(true);
+      try {
+        const res = await api.importAnalytics(articles);
+        setDataset(res.dataset);
+        toast(
+          `已导入 ${res.imported} 条${
+            res.skipped ? `，跳过 ${res.skipped} 条重复` : ""
+          }`,
+          "success"
+        );
+        setConfirmOpen(false);
+        setScreenshots([]);
+        await runAnalyze(res.dataset.dataset_id, range);
+      } catch (e) {
+        toast(friendlyMessage(e, "导入失败"), "error");
+      } finally {
+        setImporting(false);
+      }
+    },
+    [toast, range, runAnalyze]
+  );
+
+  const handleGoConfig = useCallback(() => router.push("/config"), [router]);
+
   const doClear = async () => {
     try {
       await api.clearAnalytics();
@@ -208,6 +401,26 @@ export default function AnalyticsPage() {
     );
   };
 
+  const handleDeleteRecord = useCallback(
+    async (item: AnalyticsRankItem) => {
+      if (!dataset) return;
+      try {
+        const ds = await api.deleteAnalyticsRecord({
+          dataset_id: dataset.dataset_id,
+          title: item.title,
+          date: item.date,
+        });
+        setDataset(ds);
+        // 删除后整体重算，概览 / 趋势 / 榜单 / 选题建议全部刷新
+        await runAnalyze(ds.dataset_id, range);
+        toast(`已删除《${item.title}》`, "success");
+      } catch (e) {
+        toast(friendlyMessage(e, "删除失败"), "error");
+      }
+    },
+    [dataset, range, runAnalyze, toast]
+  );
+
   const trendPoints: ChartPoint[] =
     result?.trend.map((t) => ({ label: t.date, values: [t.reads] })) ?? [];
   const engagePoints: ChartPoint[] =
@@ -232,13 +445,35 @@ export default function AnalyticsPage() {
       />
 
       <div className="mt-6">
-        <UploadZone
-          dataset={dataset}
-          uploading={uploading}
-          onUpload={handleUpload}
-          onSample={handleSample}
-          onClear={() => setConfirmClear(true)}
-        />
+        <Tabs defaultValue="table">
+          <TabsList className="mb-4">
+            <TabsTrigger value="table">表格上传</TabsTrigger>
+            <TabsTrigger value="screenshot">截图识别导入</TabsTrigger>
+          </TabsList>
+          <TabsContent value="table">
+            <UploadZone
+              dataset={dataset}
+              uploading={uploading}
+              onUpload={handleUpload}
+              onSample={handleSample}
+              onClear={() => setConfirmClear(true)}
+            />
+          </TabsContent>
+          <TabsContent value="screenshot">
+            <ScreenshotZone
+              items={screenshots}
+              busy={ocrBusy}
+              status={ocrStatus}
+              readyCount={readyCount}
+              onAdd={handleAddScreenshots}
+              onRemove={handleRemoveScreenshot}
+              onRetry={handleRetryScreenshot}
+              onClearAll={handleClearScreenshots}
+              onReview={handleReviewScreenshots}
+              onGoConfig={handleGoConfig}
+            />
+          </TabsContent>
+        </Tabs>
       </div>
 
       {error && (
@@ -412,6 +647,7 @@ export default function AnalyticsPage() {
                         items={result.rankings[t.key] ?? []}
                         metric={t.key}
                         onPick={pickRank}
+                        onDelete={handleDeleteRecord}
                       />
                     </TabsContent>
                   ))}
@@ -473,6 +709,15 @@ export default function AnalyticsPage() {
         confirmText="清空"
         onConfirm={doClear}
         onCancel={() => setConfirmClear(false)}
+      />
+
+      <OcrConfirmDialog
+        open={confirmOpen}
+        articles={confirmArticles}
+        summaries={confirmSummaries}
+        importing={importing}
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={handleConfirmImport}
       />
     </PageShell>
   );

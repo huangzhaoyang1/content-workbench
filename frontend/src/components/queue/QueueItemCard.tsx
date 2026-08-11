@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Clock,
   Loader2,
+  SkipForward,
   Trash2,
   XCircle,
   FileText,
@@ -17,12 +18,13 @@ import type { QueueItem, QueueItemStatus } from "@/lib/types";
 
 const STATUS_META: Record<
   QueueItemStatus,
-  { label: string; variant: "muted" | "warning" | "success" | "destructive"; icon: React.ElementType }
+  { label: string; variant: "muted" | "warning" | "success" | "destructive" | "secondary"; icon: React.ElementType }
 > = {
   waiting: { label: "等待中", variant: "muted", icon: Clock },
   running: { label: "执行中", variant: "warning", icon: Loader2 },
   success: { label: "已完成", variant: "success", icon: CheckCircle2 },
   failed: { label: "失败", variant: "destructive", icon: XCircle },
+  skipped: { label: "已跳过", variant: "secondary", icon: SkipForward },
 };
 
 const SOURCE_LABELS: Record<string, string> = {

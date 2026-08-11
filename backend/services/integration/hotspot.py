@@ -3,7 +3,7 @@
 统一入口 search() 返回 (items, origin, insight)：
   - 优先级：SerpAPI 实时搜索 → 自定义接口(hotspot_api.api_url) → 内置 mock
   - 任何异常都回退 mock，不影响主链路；未配置 Key 时自动用 mock
-  - 每日额度保护（见 services/quota.py）
+  - 每日额度保护（见 services/system/quota.py）
 DeepSeek 智能分析仅在配置了 Key 时调用，失败静默降级。
 """
 from __future__ import annotations
@@ -288,7 +288,7 @@ def search(cfg: dict, keyword_text: str, time_label: str, limit: int = 15) -> di
 
     优先级:SerpAPI 实时搜索 → 自定义接口 → 内置 mock。任何异常回退 mock。
     """
-    from .quota import quota_ok, quota_inc
+    from ..system.quota import quota_ok, quota_inc
 
     keywords = [ln.strip() for ln in (keyword_text or "").splitlines() if ln.strip()]
     max_hours = TIME_RANGES.get(time_label, TIME_RANGES["近7天"])

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
@@ -11,7 +11,10 @@ import {
   ListChecks,
   RefreshCw,
   Search,
+  Tag,
   Timer,
+  Trash2,
+  Undo2,
 } from "lucide-react";
 import { api, friendlyMessage } from "@/lib/api";
 import { topicSeeds } from "@/lib/seed";
@@ -24,6 +27,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button, LinkButton } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
@@ -32,12 +36,20 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { StatCard } from "@/components/ui/stat-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
-import { TaskCard, fmtDuration } from "@/components/tasks/TaskCard";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import {
+  TaskCard,
+  fmtDuration,
+  TaskStatusBadge,
+  platformLabel,
+  fmtTime,
+} from "@/components/tasks/TaskCard";
 import { TaskDetailDialog } from "@/components/tasks/TaskDetailDialog";
+import { ConfirmPublishDialog } from "@/components/tasks/ConfirmPublishDialog";
 
-const STATUSES = ["全部", "成功", "失败", "进行中"];
-const PLATFORMS = ["全部", "微信公众号", "其他"];
-const TIMES = ["全部", "近7天", "近30天", "近90天"];
+const STATUSES = ["全部", "成功", "失败", "运行中", "等待中"];
+const PLATFORMS = ["全部", "微信公众号", "小红书", "抖音", "其他"];
+const TIMES = ["全部", "近7天", "近30天", "本月", "上月"];
 const PAGE_SIZE = 10;
 
 export default function TasksPage() {
@@ -52,14 +64,40 @@ export default function TasksPage() {
   const [status, setStatus] = useState("全部");
   const [platform, setPlatform] = useState("全部");
   const [timeRange, setTimeRange] = useState("全部");
+  const [tag, setTag] = useState("全部");
+  const [allTags, setAllTags] = useState<string[]>([]);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [pendingBatchDelete, setPendingBatchDelete] = useState(false);
   const [page, setPage] = useState(1);
+
+  const [tab, setTab] = useState<"active" | "trash">("active");
+  const [trashTasks, setTrashTasks] = useState<HistoryTask[]>([]);
+  const [trashTotal, setTrashTotal] = useState(0);
+  const [trashLoading, setTrashLoading] = useState(false);
+  const [pendingTrashDelete, setPendingTrashDelete] = useState<HistoryTask | null>(null);
+  const [purging, setPurging] = useState(false);
+  const [pendingEmptyTrash, setPendingEmptyTrash] = useState(false);
 
   const [detail, setDetail] = useState<HistoryDetail | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [openingDir, setOpeningDir] = useState(false);
+  const [reviewBusy, setReviewBusy] = useState(false);
   const [enqueuingId, setEnqueuingId] = useState<number | null>(null);
+
+  // 轮询发布态期间若组件卸载，停止 setState / 清掉定时器，避免内存泄漏与控制台告警。
+  const mountedRef = useRef(true);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const load = useCallback(
     async (override?: Partial<{
@@ -67,6 +105,7 @@ export default function TasksPage() {
       status: string;
       platform: string;
       time_range: string;
+      tag: string;
       page: number;
     }>) => {
       setLoading(true);
@@ -77,6 +116,7 @@ export default function TasksPage() {
           status: override?.status ?? status,
           platform: override?.platform ?? platform,
           time_range: override?.time_range ?? timeRange,
+          tag: override?.tag ?? tag,
           page: override?.page ?? page,
           page_size: PAGE_SIZE,
         });
@@ -88,11 +128,72 @@ export default function TasksPage() {
         setLoading(false);
       }
     },
-    [keyword, status, platform, timeRange, page]
+    [keyword, status, platform, timeRange, tag, page]
   );
+
+  const loadTags = useCallback(async () => {
+    try {
+      const res = await api.taskListTags();
+      setAllTags(res.tags || []);
+    } catch {
+      /* 标签列表失败不影响主流程 */
+    }
+  }, []);
+
+  const loadTrash = useCallback(async () => {
+    setTrashLoading(true);
+    try {
+      const res = await api.taskListTrash();
+      setTrashTasks(res.tasks || []);
+      setTrashTotal(res.total || 0);
+    } catch (e) {
+      toast(friendlyMessage(e, "读取回收站失败"), "error");
+    } finally {
+      setTrashLoading(false);
+    }
+  }, [toast]);
+
+  const restoreTrashItem = async (task: HistoryTask) => {
+    try {
+      await api.taskRestore(task.issue);
+      toast(`已恢复第 ${task.issue} 期`, "success");
+      void loadTrash();
+      void load();
+      void loadTags();
+    } catch (e) {
+      toast(friendlyMessage(e, "恢复失败"), "error");
+    }
+  };
+
+  const confirmPurge = async () => {
+    if (!pendingTrashDelete) return;
+    setPurging(true);
+    try {
+      await api.taskPurge(pendingTrashDelete.issue);
+      toast(`已彻底删除第 ${pendingTrashDelete.issue} 期`, "success");
+      setPendingTrashDelete(null);
+      void loadTrash();
+    } catch (e) {
+      toast(friendlyMessage(e, "彻底删除失败"), "error");
+    } finally {
+      setPurging(false);
+    }
+  };
+
+  const confirmEmptyTrash = async () => {
+    try {
+      await api.taskEmptyTrash();
+      toast("回收站已清空", "success");
+      setPendingEmptyTrash(false);
+      void loadTrash();
+    } catch (e) {
+      toast(friendlyMessage(e, "清空失败"), "error");
+    }
+  };
 
   useEffect(() => {
     void load({ page: 1 });
+    void loadTags();
     // 只在首次挂载时拉一次，之后由筛选动作触发
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -113,6 +214,7 @@ export default function TasksPage() {
     platform: string;
     time_range: string;
     keyword: string;
+    tag: string;
   }>) => {
     setPage(1);
     void load({ ...patch, page: 1 });
@@ -200,6 +302,93 @@ export default function TasksPage() {
     }
   };
 
+  /** 确认发布前的二次确认弹窗（让用户手动指定封面期号标识） */
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  /** 待审核 → 确认发布：推送到公众号并轮询发布任务状态。 */
+  const confirmPublish = async (coverLabel = "") => {
+    if (!detail) return;
+    setReviewBusy(true);
+    try {
+      const r = await api.publishPipeline(detail.issue, coverLabel);
+      await new Promise<void>((resolve) => {
+        pollTimerRef.current = setInterval(async () => {
+          try {
+            const st = await api.pipelineStatus(r.task_id);
+            if (st.status === "success" || st.status === "failed") {
+              if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+              pollTimerRef.current = null;
+              resolve();
+            }
+          } catch {
+            if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+            pollTimerRef.current = null;
+            resolve();
+          }
+        }, 1500);
+      });
+      // 轮询期间组件已卸载：不再更新已卸载组件状态 / 弹 toast，防止内存泄漏与控制台报错。
+      if (!mountedRef.current) return;
+      await openDetail(detail.issue);
+      toast("已推送到公众号草稿箱", "success");
+    } catch (e) {
+      toast(friendlyMessage(e, "发布失败"), "error");
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
+  /** 待审核 → 放弃：只改本地状态，不调微信。 */
+  const discardIssue = async () => {
+    if (!detail) return;
+    setReviewBusy(true);
+    try {
+      await api.discardPipeline(detail.issue);
+      await openDetail(detail.issue);
+      toast("已标记为放弃（未推送）", "success");
+    } catch (e) {
+      toast(friendlyMessage(e, "操作失败"), "error");
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
+  const handleDeleteTask = async (task: HistoryTask) => {
+    try {
+      await api.deleteTask(task.issue);
+      toast(`已把第 ${task.issue} 期移入回收站`, "success");
+      void load();
+      void loadTags();
+    } catch (e) {
+      toast(friendlyMessage(e, "删除失败"), "error");
+    }
+  };
+
+  const toggleSelect = (issue: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(issue)) next.delete(issue);
+      else next.add(issue);
+      return next;
+    });
+  };
+
+  const runBatchDelete = async () => {
+    const issues = Array.from(selected);
+    if (issues.length === 0) return;
+    try {
+      await api.taskBatchDelete(issues);
+      toast(`已把 ${issues.length} 期移入回收站`, "success");
+      setSelected(new Set());
+      void load();
+      void loadTags();
+    } catch (e) {
+      toast(friendlyMessage(e, "批量删除失败"), "error");
+    } finally {
+      setPendingBatchDelete(false);
+    }
+  };
+
   const stats = data?.stats;
   const pages = data?.pages ?? 1;
 
@@ -227,7 +416,40 @@ export default function TasksPage() {
         }
       />
 
+      {/* Tab 切换：历史任务 / 回收站 */}
+      <div className="mt-4 flex w-fit items-center gap-1 rounded-lg border border-border bg-muted/20 p-1">
+        <button
+          type="button"
+          onClick={() => setTab("active")}
+          className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+            tab === "active"
+              ? "bg-background text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <History className="h-3.5 w-3.5" />
+          历史任务
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setTab("trash");
+            void loadTrash();
+          }}
+          className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+            tab === "trash"
+              ? "bg-background text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          回收站
+          <span className="text-[10px] text-muted-foreground">{trashTotal}</span>
+        </button>
+      </div>
+
       {/* 统计概览 */}
+      {tab === "active" && (
       <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {loading && !data ? (
           Array.from({ length: 4 }).map((_, i) => (
@@ -266,8 +488,10 @@ export default function TasksPage() {
           </>
         )}
       </div>
+      )}
 
       {/* 筛选 */}
+      {tab === "active" && (
       <Card className="mt-6">
         <CardContent className="flex flex-wrap items-center gap-2 p-4 sm:gap-3">
           <div className="relative w-full min-w-[200px] sm:flex-1">
@@ -324,6 +548,21 @@ export default function TasksPage() {
               </option>
             ))}
           </Select>
+          <Select
+            className="w-[calc(50%-0.25rem)] sm:w-32"
+            value={tag}
+            onChange={(e) => {
+              setTag(e.target.value);
+              applyFilter({ tag: e.target.value });
+            }}
+          >
+            <option value="全部">全部标签</option>
+            {allTags.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </Select>
           <Button
             variant="outline"
             className="w-[calc(50%-0.25rem)] sm:w-auto"
@@ -333,6 +572,31 @@ export default function TasksPage() {
           </Button>
         </CardContent>
       </Card>
+      )}
+
+      {/* 批量操作条 */}
+      {tab === "active" && selected.size > 0 && (
+        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-primary/40 bg-primary/5 px-3 py-2 text-xs">
+          <span className="font-medium">已选 {selected.size} 期</span>
+          <div className="ml-auto flex gap-2">
+            <Button
+              size="xs"
+              variant="destructive"
+              onClick={() => setPendingBatchDelete(true)}
+            >
+              <Trash2 className="mr-1 h-3 w-3" />
+              批量删除
+            </Button>
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={() => setSelected(new Set())}
+            >
+              取消选择
+            </Button>
+          </div>
+        </div>
+      )}
 
       {error && (
         <ErrorState
@@ -345,6 +609,7 @@ export default function TasksPage() {
       )}
 
       {/* 任务列表 */}
+      {tab === "active" && (
       <Card className="mt-4">
         <CardHeader className="flex-row items-center justify-between space-y-0">
           <CardTitle className="text-base">
@@ -417,12 +682,14 @@ export default function TasksPage() {
                       setStatus("全部");
                       setPlatform("全部");
                       setTimeRange("全部");
+                      setTag("全部");
                       setPage(1);
                       void load({
                         keyword: "",
                         status: "全部",
                         platform: "全部",
                         time_range: "全部",
+                        tag: "全部",
                         page: 1,
                       });
                     }}
@@ -450,7 +717,10 @@ export default function TasksPage() {
                   onView={openDetail}
                   onReuse={reuseTopic}
                   onEnqueue={enqueue}
+                  onDelete={handleDeleteTask}
                   enqueuing={enqueuingId === t.issue}
+                  selected={selected.has(t.issue)}
+                  onToggle={toggleSelect}
                 />
               ))}
             </div>
@@ -468,6 +738,96 @@ export default function TasksPage() {
           )}
         </CardContent>
       </Card>
+      )}
+
+      {/* 回收站 */}
+      {tab === "trash" && (
+      <Card className="mt-4">
+        <CardHeader className="flex-row items-center justify-between space-y-0">
+          <CardTitle className="text-base">
+            回收站
+            <span className="ml-2 text-sm font-normal text-muted-foreground">
+              共 {trashTotal} 期
+            </span>
+          </CardTitle>
+          {trashTotal > 0 && (
+            <Button
+              size="xs"
+              variant="destructive"
+              onClick={() => setPendingEmptyTrash(true)}
+            >
+              <Trash2 className="mr-1 h-3 w-3" />
+              清空回收站
+            </Button>
+          )}
+        </CardHeader>
+        <CardContent>
+          {trashLoading ? (
+            <div className="space-y-3">
+              {[0, 1, 2].map((i) => (
+                <Skeleton key={i} className="h-28 w-full" />
+              ))}
+            </div>
+          ) : trashTasks.length === 0 ? (
+            <EmptyState
+              icon={Trash2}
+              title="回收站是空的"
+              description="删除的历史任务会先到这里，可随时恢复或彻底删除。"
+            />
+          ) : (
+            <div className="space-y-3">
+              {trashTasks.map((t) => (
+                <Card key={t.issue} className="transition-colors">
+                  <CardContent className="p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="outline">第 {t.issue} 期</Badge>
+                          <TaskStatusBadge status={t.status} />
+                          <Badge variant="secondary">{platformLabel(t.platform)}</Badge>
+                          {t.tags && t.tags.length > 0 && (
+                            <span className="inline-flex flex-wrap gap-1 align-middle">
+                              {t.tags.map((tt) => (
+                                <Badge key={tt} variant="outline" className="text-[10px]">
+                                  {tt}
+                                </Badge>
+                              ))}
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-2 truncate text-sm font-medium">{t.title || "（无标题）"}</p>
+                        <div className="mt-2 text-[11px] text-muted-foreground">
+                          完成 {fmtTime(t.completed_at)}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 flex-wrap gap-1.5">
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          onClick={() => void restoreTrashItem(t)}
+                        >
+                          <Undo2 className="h-3 w-3" />
+                          恢复
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          className="text-destructive hover:bg-destructive/10"
+                          onClick={() => setPendingTrashDelete(t)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          彻底删除
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      )}
 
       <TaskDetailDialog
         open={detailOpen}
@@ -475,9 +835,56 @@ export default function TasksPage() {
         detail={detail}
         regenerating={regenerating}
         openingDir={openingDir}
+        reviewBusy={reviewBusy}
         onClose={() => setDetailOpen(false)}
         onRegenerate={regenerate}
         onOpenDir={openDir}
+        onConfirmPublish={() => setConfirmOpen(true)}
+        onDiscard={discardIssue}
+        onTagsSaved={(issue) => {
+          void openDetail(issue);
+          void loadTags();
+        }}
+      />
+
+      <ConfirmPublishDialog
+        open={confirmOpen}
+        issue={detail?.issue ?? 0}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={confirmPublish}
+      />
+
+      <ConfirmDialog
+        open={pendingBatchDelete}
+        title={`批量删除 ${selected.size} 期任务？`}
+        description="将连同整期产出目录一并移入回收站，可在回收站里恢复。"
+        confirmText="批量删除"
+        onConfirm={runBatchDelete}
+        onCancel={() => setPendingBatchDelete(false)}
+      />
+
+      <ConfirmDialog
+        open={!!pendingTrashDelete}
+        title="彻底删除这个任务？"
+        description={
+          pendingTrashDelete
+            ? `将永久删除第 ${pendingTrashDelete.issue} 期，不可恢复。`
+            : ""
+        }
+        confirmText="彻底删除"
+        destructive
+        loading={purging}
+        onConfirm={confirmPurge}
+        onCancel={() => setPendingTrashDelete(null)}
+      />
+
+      <ConfirmDialog
+        open={pendingEmptyTrash}
+        title="清空回收站？"
+        description="回收站里的所有历史任务都会被永久删除，不可恢复。"
+        confirmText="清空"
+        onConfirm={confirmEmptyTrash}
+        onCancel={() => setPendingEmptyTrash(false)}
       />
     </PageShell>
   );

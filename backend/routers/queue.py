@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from ..services import queue as task_queue
+from ..services.system import queue as task_queue
 
 router = APIRouter(tags=["queue"])
 
@@ -15,6 +15,7 @@ class QueueAddReq(BaseModel):
     extra: str = ""
     platform: str = "wechat"
     source: str = "manual"
+    topic_id: str = ""  # 关联选题库条目 id（用于生产完成后翻转状态）
     # 批量加入（选题页/历史任务页一次带多条时用）
     items: list[dict] | None = None
 
@@ -35,7 +36,7 @@ def add_to_queue(body: QueueAddReq) -> dict:
         return {"added": len(added), "items": added, **task_queue.stats()}
     try:
         item = task_queue.add(
-            body.topic, body.angle, body.extra, body.platform, body.source
+            body.topic, body.angle, body.extra, body.platform, body.source, body.topic_id
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -46,6 +47,15 @@ def add_to_queue(body: QueueAddReq) -> dict:
 def start_queue() -> dict:
     """开始顺序执行队列中等待的任务。"""
     return task_queue.start()
+
+
+@router.post("/queue/skip")
+def skip_current() -> dict:
+    """跳过当前正在执行的任务（标记为 skipped 并继续下一条）。"""
+    res = task_queue.skip_current()
+    if not res.get("ok"):
+        raise HTTPException(status_code=400, detail=res.get("reason", "跳过失败"))
+    return {"ok": True, "id": res.get("id"), **task_queue.stats()}
 
 
 @router.delete("/queue/{item_id}")

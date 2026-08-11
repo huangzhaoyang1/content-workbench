@@ -12,6 +12,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  SkipForward,
   Trash2,
   XCircle,
 } from "lucide-react";
@@ -61,6 +62,7 @@ export default function QueuePage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [skipping, setSkipping] = useState(false);
   const [adding, setAdding] = useState(false);
   const [savingJob, setSavingJob] = useState(false);
   const [confirmBusy, setConfirmBusy] = useState(false);
@@ -69,6 +71,7 @@ export default function QueuePage() {
   const [topic, setTopic] = useState("");
   const [angle, setAngle] = useState("");
   const [extra, setExtra] = useState("");
+  const [draftTopicId, setDraftTopicId] = useState("");
   const [topicError, setTopicError] = useState("");
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -95,15 +98,37 @@ export default function QueuePage() {
   );
 
   useEffect(() => {
-    void load();
-    // 别的页面「加入队列」时可能带了草稿过来，预填表单
-    const d = queueDraft.take();
-    if (d) {
-      setTopic(d.topic);
-      setAngle(d.angle ?? "");
-      setExtra(d.extra ?? "");
-      setTimeout(() => topicRef.current?.focus(), 60);
-    }
+    const init = async () => {
+      await load();
+      // 别的页面「加入队列」时可能带了草稿过来：自动入队并立即开始生产
+      const d = queueDraft.take();
+      if (d) {
+        try {
+          toast(`正在自动入队并开始生产：${d.topic}`, "info");
+          await api.addQueue({
+            topic: d.topic,
+            angle: d.angle ?? "",
+            extra: d.extra ?? "",
+            source: "manual",
+            topic_id: d.topic_id ?? "",
+          });
+          const startRes = await api.startQueue();
+          if (startRes.started) {
+            toast("已自动开始生产", "success");
+          } else {
+            toast("已加入队列，请手动点「开始执行」", "warning");
+          }
+          router.push("/tasks");
+        } catch (e) {
+          toast(friendlyMessage(e, "自动入队失败，请手动操作"), "error");
+          setTopic(d.topic);
+          setAngle(d.angle ?? "");
+          setExtra(d.extra ?? "");
+          setDraftTopicId(d.topic_id ?? "");
+        }
+      }
+    };
+    void init();
   }, [load]);
 
   // 队列在跑的时候自动轮询，跑完自动停
@@ -127,10 +152,12 @@ export default function QueuePage() {
         angle: angle.trim(),
         extra: extra.trim(),
         source: "manual",
+        topic_id: draftTopicId || undefined,
       });
       setTopic("");
       setAngle("");
       setExtra("");
+      setDraftTopicId("");
       toast("已加入队列", {
         type: "success",
         action: { label: "去队列", onClick: () => router.push("/queue") },
@@ -154,6 +181,20 @@ export default function QueuePage() {
       toast(friendlyMessage(e, "启动失败"), "error");
     } finally {
       setStarting(false);
+    }
+  };
+
+  const handleSkip = async () => {
+    setSkipping(true);
+    try {
+      const res = await api.skipQueue();
+      if (res.ok) toast("已跳过当前任务", "success");
+      else toast(res.reason ?? "跳过失败", "warning");
+      await load(true);
+    } catch (e) {
+      toast(friendlyMessage(e, "跳过失败"), "error");
+    } finally {
+      setSkipping(false);
     }
   };
 
@@ -331,6 +372,20 @@ export default function QueuePage() {
             </Button>
             <Button
               size="sm"
+              variant="outline"
+              onClick={handleSkip}
+              disabled={skipping || !snap?.is_running}
+              title={snap?.is_running ? "跳过正在执行的任务" : "当前没有正在执行的任务"}
+            >
+              {skipping ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <SkipForward className="h-4 w-4" />
+              )}
+              跳过当前任务
+            </Button>
+            <Button
+              size="sm"
               variant="ghost"
               disabled={items.length === 0}
               onClick={() => setPending({ kind: "clear-finished" })}
@@ -359,7 +414,7 @@ export default function QueuePage() {
             <EmptyState
               icon={Layers}
               title="队列是空的"
-              description="在下面手动加一条，或者从「选题与生产」「数据分析」「历史任务」页把选题直接送进来。"
+              description="在下面手动加一条选题，或者从其他页面把选题送进来自动开始生产：热点素材页勾选后点「直接加入队列」、爆款拆解页点「直接生产」、选题页点「加入队列」、历史任务页点「加入队列」。"
             />
           ) : (
             <div className="space-y-3">

@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from ..config import env_managed_fields, settings
+from ..services.system.config import env_managed_fields, settings
 
 router = APIRouter(tags=["health"])
 

@@ -4,17 +4,24 @@ import * as React from "react";
 import {
   ChevronDown,
   ChevronRight,
+  CheckCircle2,
+  Clock,
   FileText,
   FolderOpen,
   ImageIcon,
   ListPlus,
   Loader2,
   RefreshCw,
+  Tag,
+  XCircle,
 } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/components/ui/toast";
+import { api, friendlyMessage } from "@/lib/api";
 import type { HistoryDetail } from "@/lib/types";
 import {
   TaskStatusBadge,
@@ -29,9 +36,13 @@ interface TaskDetailDialogProps {
   detail: HistoryDetail | null;
   regenerating: boolean;
   openingDir: boolean;
+  reviewBusy: boolean;
   onClose: () => void;
   onRegenerate: (mode: "queue" | "now") => void;
   onOpenDir: () => void;
+  onConfirmPublish: () => void;
+  onDiscard: () => void;
+  onTagsSaved?: (issue: number) => void;
 }
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
@@ -50,15 +61,48 @@ export function TaskDetailDialog({
   detail,
   regenerating,
   openingDir,
+  reviewBusy,
   onClose,
   onRegenerate,
   onOpenDir,
+  onConfirmPublish,
+  onDiscard,
+  onTagsSaved,
 }: TaskDetailDialogProps) {
+  const { toast } = useToast();
   const [showArticle, setShowArticle] = React.useState(false);
+  const [editTags, setEditTags] = React.useState<string[]>([]);
+  const [tagDraft, setTagDraft] = React.useState("");
+  const [savingTags, setSavingTags] = React.useState(false);
 
   React.useEffect(() => {
     if (open) setShowArticle(false);
   }, [open, detail?.issue]);
+
+  React.useEffect(() => {
+    if (detail) setEditTags(detail.tags || []);
+  }, [detail?.issue, detail]);
+
+  const addTag = () => {
+    const v = tagDraft.trim();
+    if (!v) return;
+    if (!editTags.includes(v)) setEditTags([...editTags, v]);
+    setTagDraft("");
+  };
+
+  const saveTags = async () => {
+    if (!detail) return;
+    setSavingTags(true);
+    try {
+      await api.taskSetTags(detail.issue, editTags);
+      toast("标签已保存", "success");
+      onTagsSaved?.(detail.issue);
+    } catch (e) {
+      toast(friendlyMessage(e, "保存标签失败"), "error");
+    } finally {
+      setSavingTags(false);
+    }
+  };
 
   return (
     <Dialog open={open} onClose={onClose}>
@@ -117,6 +161,44 @@ export function TaskDetailDialog({
                 立即重新生成
               </Button>
             </div>
+
+            {/* 待审核：审核后一键发布 / 放弃 */}
+            {detail.draft_status === "PENDING_REVIEW" && (
+              <div className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <Badge variant="warning">
+                    <Clock className="mr-1 h-3 w-3" />
+                    待审核
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    文章与封面已就绪但未推送，审核后点「确认发布」推到公众号草稿箱。
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button size="sm" onClick={onConfirmPublish} disabled={reviewBusy}>
+                    {reviewBusy ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="h-4 w-4" />
+                    )}
+                    确认发布
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={onDiscard}
+                    disabled={reviewBusy}
+                  >
+                    {reviewBusy ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <XCircle className="h-4 w-4" />
+                    )}
+                    放弃
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-2">
@@ -137,6 +219,60 @@ export function TaskDetailDialog({
                 <div className="space-y-1.5">
                   <Row label="选题" value={detail.topic || "—"} />
                   <Row label="切入角度" value={detail.angle || "—"} />
+                </div>
+              </section>
+
+              <section>
+                <h3 className="mb-2 flex items-center gap-1.5 text-sm font-medium">
+                  <Tag className="h-4 w-4" /> 标签
+                </h3>
+                <div className="flex flex-wrap gap-1.5">
+                  {editTags.length === 0 && (
+                    <span className="text-xs text-muted-foreground">暂无标签</span>
+                  )}
+                  {editTags.map((t) => (
+                    <Badge
+                      key={t}
+                      variant="outline"
+                      className="gap-1 pr-1"
+                    >
+                      {t}
+                      <button
+                        type="button"
+                        className="ml-0.5 rounded-full p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                        onClick={() => setEditTags(editTags.filter((x) => x !== t))}
+                        aria-label={`删除标签 ${t}`}
+                      >
+                        <XCircle className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <Input
+                    className="h-8 text-xs"
+                    placeholder="输入标签后回车添加"
+                    value={tagDraft}
+                    onChange={(e) => setTagDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === ",") {
+                        e.preventDefault();
+                        addTag();
+                      }
+                    }}
+                  />
+                  <Button size="xs" variant="outline" type="button" onClick={addTag}>
+                    添加
+                  </Button>
+                  <Button
+                    size="xs"
+                    type="button"
+                    onClick={saveTags}
+                    disabled={savingTags}
+                  >
+                    {savingTags && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                    保存标签
+                  </Button>
                 </div>
               </section>
 

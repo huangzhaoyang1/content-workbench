@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 from datetime import date
 
-from ..config import DATA_DIR
+from .config import DATA_DIR
 
 # 统一走 config.DATA_DIR，跟其余持久化文件保持一致，
 # 这样 WORKBENCH_DATA_DIR 环境变量能一次性改掉所有数据落盘位置。

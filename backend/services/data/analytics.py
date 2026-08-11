@@ -16,7 +16,7 @@ import threading
 import uuid
 from pathlib import Path
 
-from ..config import DATA_DIR
+from ..system.config import DATA_DIR
 
 _STORE_PATH = DATA_DIR / "analytics_last.json"
 _LOCK = threading.Lock()
@@ -125,6 +125,16 @@ def _to_date(v) -> str | None:
         except ValueError:
             return None
     return None
+
+
+def to_date(v) -> str | None:
+    """公开别名：截图识别等其他服务复用同一套日期归一化逻辑，避免两份实现走偏。"""
+    return _to_date(v)
+
+
+def to_number(v) -> float | None:
+    """公开别名，同上。"""
+    return _to_number(v)
 
 
 def _decode_csv(content: bytes) -> str:
@@ -287,6 +297,194 @@ def clear() -> None:
                 _STORE_PATH.unlink()
         except Exception:
             pass
+
+
+# --------------------------------------------------------------------------
+# 截图识别数据导入
+# 与 CSV/Excel 上传并行的第二条入口：识别 → 用户确认 → 合并进当前数据集。
+# 记录结构与 CSV 解析出来的完全一致（title/date/reads/likes/shares），
+# 所以概览、趋势、榜单、选题建议全部能直接复用，不需要改分析逻辑。
+# --------------------------------------------------------------------------
+_OCR_HEADERS = ["日期", "标题", "阅读量", "在看", "分享"]
+_OCR_MAPPING: dict[str, str] = {
+    "title": "标题",
+    "date": "日期",
+    "reads": "阅读量",
+    "likes": "在看",
+    "shares": "分享",
+}
+_MAX_IMPORT_ROWS = 500
+
+
+def _rec_key(title: str | None, date: str | None) -> tuple[str, str]:
+    """去重键：标题去掉所有空白并转小写 + 日期。标题+日期相同即视为同一篇。"""
+    t = re.sub(r"\s+", "", str(title or "")).lower()
+    return (t, date or "")
+
+
+def _normalize_import_record(item: dict) -> dict | None:
+    """把前端确认后的一行数据清洗成标准记录；不合格返回 None。"""
+    if not isinstance(item, dict):
+        return None
+    title = str(item.get("title") or "").strip()
+    if not title:
+        return None
+
+    def pos(key: str) -> float | None:
+        n = _to_number(item.get(key))
+        if n is None or n < 0:
+            return None
+        return float(int(n))
+
+    reads, likes, shares = pos("reads"), pos("likes"), pos("shares")
+    wow, collects = pos("wow"), pos("collects")
+    # 老版后台只有「点赞」没有「在看」时，用点赞兜底，保证图表有数据可画
+    if likes is None and wow is not None:
+        likes = wow
+    if reads is None and likes is None and shares is None:
+        return None
+
+    rec: dict = {
+        "title": title[:200],
+        "date": _to_date(item.get("date")),
+        "reads": reads,
+        "likes": likes,
+        "shares": shares,
+        "source": "ocr",
+    }
+    # 扩展字段只在有值时写入；analyze() 不读它们，纯粹作为原始留档
+    if wow is not None:
+        rec["wow"] = wow
+    if collects is not None:
+        rec["collects"] = collects
+    return rec
+
+
+def _blank_ocr_dataset() -> dict:
+    return {
+        "dataset_id": uuid.uuid4().hex[:12],
+        "filename": "截图识别数据",
+        "headers": list(_OCR_HEADERS),
+        "mapping": dict(_OCR_MAPPING),
+        "records": [],
+        "row_count": 0,
+        "has_date": False,
+        "uploaded_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "is_sample": False,
+        "source": "ocr",
+    }
+
+
+def import_records(items: list[dict]) -> dict:
+    """把识别确认后的文章数据合并进当前数据集。
+
+    合并规则：
+    - 当前已有真实数据集 → 追加进去（CSV 数据和截图数据可以混着用）；
+    - 当前是示例数据或没有数据 → 新建一个「截图识别数据」数据集，避免污染示例；
+    - 去重：标题（忽略空白大小写）+ 日期完全相同的记录跳过，不重复计入。
+
+    返回 {dataset, imported, skipped, duplicates}。
+    """
+    if not isinstance(items, list) or not items:
+        raise AnalyticsError("没有收到要导入的数据。")
+    if len(items) > _MAX_IMPORT_ROWS:
+        raise AnalyticsError(f"单次最多导入 {_MAX_IMPORT_ROWS} 条，请分批确认导入。")
+
+    incoming: list[dict] = []
+    for it in items:
+        rec = _normalize_import_record(it)
+        if rec:
+            incoming.append(rec)
+    if not incoming:
+        raise AnalyticsError(
+            "没有可导入的有效数据：每条至少需要「标题」，以及阅读量 / 在看 / 分享中的任意一项。"
+        )
+
+    with _LOCK:
+        ds = get_dataset(None)
+        if ds is None or ds.get("is_sample"):
+            ds = _blank_ocr_dataset()
+
+        existing = {_rec_key(r.get("title"), r.get("date")) for r in ds["records"]}
+        imported = 0
+        duplicates: list[str] = []
+        for rec in incoming:
+            key = _rec_key(rec["title"], rec["date"])
+            if key in existing:
+                duplicates.append(rec["title"])
+                continue
+            existing.add(key)
+            ds["records"].append(rec)
+            imported += 1
+
+        # 按日期升序，没日期的排最后，趋势图才是顺的
+        ds["records"].sort(key=lambda r: r.get("date") or "9999-99-99")
+        ds["row_count"] = len(ds["records"])
+        ds["has_date"] = any(r.get("date") for r in ds["records"])
+        ds["uploaded_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ds["is_sample"] = False
+        # CSV 数据集可能有列没识别出来，截图补进来了就把标准列名填上，
+        # 否则前端「识别到的列」徽标会一直显示「未识别」，看着像丢数据。
+        mapping = dict(ds.get("mapping") or {})
+        for field, label in _OCR_MAPPING.items():
+            if not mapping.get(field):
+                mapping[field] = label
+        ds["mapping"] = mapping
+        if imported:
+            ds["filename"] = _merge_filename(ds.get("filename"))
+
+        _DATASETS[ds["dataset_id"]] = ds
+        _persist(ds)
+
+    return {
+        "dataset": ds,
+        "imported": imported,
+        "skipped": len(duplicates),
+        "duplicates": duplicates[:10],
+    }
+
+
+def _merge_filename(current: str | None) -> str:
+    """数据集里混入截图数据后，名字上体现出来，避免用户以为还是纯 CSV。"""
+    name = (current or "").strip()
+    if not name or name == "截图识别数据":
+        return "截图识别数据"
+    if "＋截图" in name:
+        return name
+    return f"{name}＋截图"
+
+
+def delete_record(dataset_id: str | None, title: str, date: str | None) -> dict:
+    """按「标题 + 日期」去重键删除一条记录，并刷新 row_count、重新持久化。
+
+    返回删除后的数据集（与 get_dataset 同一份引用，已经落盘）。
+    找不到匹配记录时抛 AnalyticsError，便于路由层转成 400 给用户。
+    """
+    if not title or not str(title).strip():
+        raise AnalyticsError("删除失败：缺少标题，无法定位要删除的数据。")
+    key = _rec_key(title, date)
+    with _LOCK:
+        ds = get_dataset(dataset_id)
+        if ds is None:
+            raise AnalyticsError("没有可操作的数据集，请先上传数据或载入示例数据。")
+        records = ds.get("records") or []
+        before = len(records)
+        kept = [r for r in records if _rec_key(r.get("title"), r.get("date")) != key]
+        removed = before - len(kept)
+        if removed == 0:
+            suffix = f"（日期 {date}）" if date else ""
+            raise AnalyticsError(
+                f"没找到可删除的记录：标题「{title}」{suffix}。"
+                f"可能已经被删除，或标题/日期与数据不完全一致。"
+            )
+        ds["records"] = kept
+        ds["row_count"] = len(kept)
+        ds["has_date"] = any(r.get("date") for r in kept)
+        ds["uploaded_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        _DATASETS[ds["dataset_id"]] = ds
+        _persist(ds)
+    return ds
+
 
 
 # --------------------------------------------------------------------------

@@ -6,8 +6,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from ..config import ConfigWriteError, load_config, save_config
-from ..services import hotspot
+from ..services.system.config import ConfigWriteError, load_config, save_config
+from ..services.integration import hotspot
 
 router = APIRouter(tags=["config"])
 
