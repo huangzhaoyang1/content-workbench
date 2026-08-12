@@ -11,6 +11,8 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
+  ChevronDown,
+  ChevronUp,
   Terminal,
   Flame,
   ExternalLink,
@@ -19,6 +21,7 @@ import {
   ListPlus,
   X,
   ListChecks,
+  Library,
   Image as ImageIcon,
   FolderOpen,
   RotateCw,
@@ -31,6 +34,7 @@ import type {
   HotspotItem,
   PipelineStartResult,
   PipelineStatus,
+  QueueSnapshot,
   TopicCandidate,
   TopicSeed,
 } from "@/lib/types";
@@ -55,6 +59,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Progress } from "@/components/ui/progress";
 import { Steps, type StepDef } from "@/components/ui/steps";
 import { ConfirmPublishDialog } from "@/components/tasks/ConfirmPublishDialog";
+import { TopicLibraryDialog } from "@/components/dissect/TopicLibraryDialog";
 
 type Phase = "idle" | "generating" | "ready" | "producing" | "running" | "done";
 
@@ -201,6 +206,112 @@ function DataInsightCard({ data }: { data: DataInsight }) {
   );
 }
 
+/** 加入队列后的内联进度卡：轮询队列状态 + 当前执行任务的实时日志，主流程不跳页。 */
+function InlineQueueCard({
+  snap,
+  logs,
+  onClose,
+  onGoQueue,
+}: {
+  snap: QueueSnapshot;
+  logs: string[];
+  onClose: () => void;
+  onGoQueue: () => void;
+}) {
+  const pct =
+    snap.stats.total > 0
+      ? Math.round(((snap.stats.success + snap.stats.failed) / snap.stats.total) * 100)
+      : 0;
+  const logClass = (line: string) =>
+    /\[error\]|Traceback|错误/.test(line)
+      ? "whitespace-pre-wrap text-destructive"
+      : /\[warn\]/.test(line)
+        ? "whitespace-pre-wrap text-amber-300/90"
+        : "whitespace-pre-wrap text-emerald-200/90";
+  return (
+    <Card className="mt-6 animate-fade-in border-sky-500/40">
+      <CardHeader className="pb-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <ListChecks className="h-4 w-4 text-sky-400" />
+          <CardTitle className="text-base">队列内联进度</CardTitle>
+          {snap.is_running ? (
+            <Badge variant="warning">
+              <Clock className="mr-1 h-3 w-3" /> 执行中
+            </Badge>
+          ) : (
+            <Badge variant="muted">已停止</Badge>
+          )}
+          <Button variant="ghost" size="xs" className="ml-auto" onClick={onClose}>
+            收起
+          </Button>
+        </div>
+        <div className="mt-2 flex items-center gap-3">
+          <Progress
+            value={pct}
+            indicatorClassName={
+              snap.stats.failed > 0 ? "bg-amber-500" : "bg-emerald-500"
+            }
+          />
+          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+            {pct}%
+          </span>
+        </div>
+        <div className="mt-1 flex flex-wrap gap-1.5 text-xs">
+          <Badge variant="muted">等待 {snap.stats.waiting}</Badge>
+          <Badge variant="warning">执行 {snap.stats.running}</Badge>
+          <Badge variant="success">完成 {snap.stats.success}</Badge>
+          {snap.stats.failed > 0 && (
+            <Badge variant="destructive">失败 {snap.stats.failed}</Badge>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        {snap.items.length === 0 ? (
+          <p className="text-xs text-muted-foreground">队列为空。</p>
+        ) : (
+          <div className="space-y-1.5">
+            {snap.items.map((it) => (
+              <div
+                key={it.id}
+                className="flex flex-wrap items-center gap-2 rounded-lg border border-border px-2.5 py-1.5"
+              >
+                <span className="min-w-0 flex-1 truncate">{it.topic}</span>
+                {it.status === "waiting" && <Badge variant="muted">排队中</Badge>}
+                {it.status === "running" && <Badge variant="warning">执行中</Badge>}
+                {it.status === "success" && <Badge variant="success">完成</Badge>}
+                {it.status === "failed" && <Badge variant="destructive">失败</Badge>}
+                {it.status === "skipped" && <Badge variant="outline">跳过</Badge>}
+                {it.error && (
+                  <span className="w-full text-[11px] text-destructive">{it.error}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {logs.length > 0 && (
+          <div>
+            <div className="mb-1 flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+              <Terminal className="h-3 w-3" /> 实时日志
+            </div>
+            <div className="max-h-48 overflow-auto rounded-lg border border-border bg-black/40 p-3 font-mono text-xs leading-relaxed">
+              {logs.slice(-40).map((line, i) => (
+                <div key={i} className={logClass(line)}>
+                  {line}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <Button size="xs" variant="outline" onClick={onGoQueue}>
+            去队列页管理
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function TopicPage() {
   const { toast } = useToast();
   const router = useRouter();
@@ -249,6 +360,22 @@ export default function TopicPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [showArticle, setShowArticle] = useState(false);
+
+  // 选题库入口：顶部计数 + 弹窗
+  const [libOpen, setLibOpen] = useState(false);
+  const [libCount, setLibCount] = useState(0);
+
+  // 加入队列后的「内联进度卡」
+  const [showQueueCard, setShowQueueCard] = useState(false);
+  const [queueSnap, setQueueSnap] = useState<QueueSnapshot | null>(null);
+  const [queueLog, setQueueLog] = useState<string[]>([]);
+
+  // 数据洞察默认收起（候选选题成为主视觉）
+  const [insightOpen, setInsightOpen] = useState(false);
+
+  // 滚动锚点
+  const topicsRef = useRef<HTMLDivElement>(null);
+  const formRef = useRef<HTMLDivElement>(null);
 
   // 轮询发布态期间若组件卸载，停止 setState / 清掉定时器，避免内存泄漏与控制台告警。
   const mountedRef = useRef(true);
@@ -301,6 +428,53 @@ export default function TopicPage() {
     };
   }, []);
 
+  // 顶部「选题库（N）」入口计数：进页面先拉一次总数
+  useEffect(() => {
+    let active = true;
+    api
+      .dissectListTopics({ limit: 1 })
+      .then((r) => {
+        if (active) setLibCount(r.total);
+      })
+      .catch(() => {
+        /* 计数失败不影响使用 */
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // 内联队列卡：开启后轮询 /api/queue，并取当前执行任务的实时日志
+  useEffect(() => {
+    if (!showQueueCard) return;
+    let active = true;
+    const tick = async () => {
+      try {
+        const snap = await api.getQueue();
+        if (!active) return;
+        setQueueSnap(snap);
+        const running = snap.items.find((i) => i.status === "running" && i.task_id);
+        const target = running ?? [...snap.items].reverse().find((i) => i.task_id);
+        if (target?.task_id) {
+          try {
+            const st = await api.pipelineStatus(target.task_id);
+            if (active) setQueueLog(st.logs ?? []);
+          } catch {
+            /* 日志拉取失败不阻塞进度 */
+          }
+        }
+      } catch {
+        /* 队列接口暂不可达 */
+      }
+    };
+    void tick();
+    const timer = setInterval(() => void tick(), 1500);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [showQueueCard]);
+
   const removeSeed = (topic: string) => setSeeds(topicSeeds.remove(topic));
 
   const clearSeeds = () => {
@@ -340,6 +514,9 @@ export default function TopicPage() {
       });
       setTopics(res.topics);
       setPhase("ready");
+      requestAnimationFrame(() =>
+        topicsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+      );
       toast(`生成了 ${res.topics.length} 个候选选题`, "success");
     } catch (e) {
       const msg = friendlyMessage(e, "生成选题失败");
@@ -359,10 +536,8 @@ export default function TopicPage() {
         extra: t.structure ? `建议结构：${t.structure}` : "",
         source: "topic",
       });
-      toast("已加入任务队列", {
-        type: "success",
-        action: { label: "去队列", onClick: () => router.push("/queue") },
-      });
+      setShowQueueCard(true);
+      toast("已加入任务队列，进度在下方实时跟进", "success");
     } catch (e) {
       toast(friendlyMessage(e, "加入队列失败"), "error");
     } finally {
@@ -377,6 +552,9 @@ export default function TopicPage() {
     setFormExtra("");
     setFormErrors({});
     setPhase("producing");
+    requestAnimationFrame(() =>
+      formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+    );
   };
 
   const validate = () => {
@@ -645,6 +823,10 @@ export default function TopicPage() {
               <ListChecks className="h-4 w-4" />
               任务队列
             </LinkButton>
+            <Button variant="outline" size="sm" onClick={() => setLibOpen(true)}>
+              <Library className="h-4 w-4" />
+              选题库（{libCount}）
+            </Button>
           </>
         }
       />
@@ -672,7 +854,32 @@ export default function TopicPage() {
           </CardContent>
         </Card>
       ) : (
-        insight && <DataInsightCard data={insight} />
+        insight && (
+          <div className="mt-5">
+            <button
+              type="button"
+              onClick={() => setInsightOpen((v) => !v)}
+              className="flex w-full items-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 px-4 py-2.5 text-left text-sm"
+            >
+              <BarChart3 className="h-4 w-4 shrink-0 text-indigo-400" />
+              <span className="font-medium">数据洞察</span>
+              {insight.available && insight.summary && (
+                <span className="hidden truncate text-xs text-muted-foreground sm:inline">
+                  {insight.summary}
+                </span>
+              )}
+              <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                {insightOpen ? "收起" : "展开参考"}
+              </span>
+              {insightOpen ? (
+                <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+              ) : (
+                <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+              )}
+            </button>
+            {insightOpen && <DataInsightCard data={insight} />}
+          </div>
+        )
       )}
 
       {/* 数据分析 / 历史任务带来的选题参考 */}
@@ -813,7 +1020,7 @@ export default function TopicPage() {
 
       {/* 选题卡片 */}
       {topics.length > 0 && phase !== "generating" && (
-        <div className="mt-6 space-y-3">
+        <div className="mt-6 space-y-3" ref={topicsRef}>
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-lg font-semibold">候选选题</h2>
             <Badge variant="secondary">{topics.length} 个</Badge>
@@ -882,9 +1089,19 @@ export default function TopicPage() {
         </div>
       )}
 
+      {/* 加入队列后的内联进度卡（不跳历史任务页） */}
+      {showQueueCard && queueSnap && (
+        <InlineQueueCard
+          snap={queueSnap}
+          logs={queueLog}
+          onClose={() => setShowQueueCard(false)}
+          onGoQueue={() => router.push("/queue")}
+        />
+      )}
+
       {/* 生产表单 */}
       {phase === "producing" && picked && (
-        <Card className="mt-6 animate-fade-in">
+        <Card className="mt-6 animate-fade-in" ref={formRef}>
           <CardHeader>
             <CardTitle className="text-base">生产参数</CardTitle>
             <CardDescription>确认或调整内容，启动流水线。</CardDescription>
@@ -1345,6 +1562,12 @@ export default function TopicPage() {
           }
         />
       )}
+
+      <TopicLibraryDialog
+        open={libOpen}
+        onClose={() => setLibOpen(false)}
+        onCountChange={setLibCount}
+      />
     </PageShell>
   );
 }

@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   XCircle,
   Filter,
+  Library,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
@@ -43,6 +44,7 @@ import type {
   DouyinSyncSourceKind,
   DouyinSyncRecordStatus,
   DouyinSyncRun,
+  TopicLibraryItem,
 } from "@/lib/types";
 
 const STATUS_LABEL: Record<DouyinSyncRecordStatus, string> = {
@@ -105,6 +107,26 @@ export default function DouyinSyncPage() {
   const [runs, setRuns] = React.useState<DouyinSyncRun[]>([]);
   const [expandedRun, setExpandedRun] = React.useState<string | null>(null);
 
+  // 抖音选题库（素材池沉淀进 topic_library、source=douyin_sync 的条目）
+  const [dyTopics, setDyTopics] = React.useState<TopicLibraryItem[]>([]);
+  const [dyLoading, setDyLoading] = React.useState(false);
+  const loadDyTopics = React.useCallback(async () => {
+    setDyLoading(true);
+    try {
+      const r = await api.dissectListTopics({ limit: 200 });
+      setDyTopics(r.items.filter((i) => i.source === "douyin_sync"));
+    } catch (e) {
+      toast(friendlyMessage(e, "读取抖音选题库失败"), "error");
+    } finally {
+      setDyLoading(false);
+    }
+  }, [toast]);
+  const dyStatusVariant = (s: string): "secondary" | "warning" | "success" => {
+    if (s === "已完成") return "success";
+    if (s === "生产中") return "warning";
+    return "secondary";
+  };
+
   const refreshState = React.useCallback(async () => {
     try {
       const s = await api.douyinSyncState();
@@ -159,6 +181,10 @@ export default function DouyinSyncPage() {
     void refreshRecords();
     void refreshRuns();
   }, [refreshState, refreshRecords, refreshRuns]);
+
+  React.useEffect(() => {
+    if (tab === "library") void loadDyTopics();
+  }, [tab, loadDyTopics]);
 
   // ---- 配置编辑 ----
   const patchCfg = (patch: Partial<DouyinSyncConfig>) => {
@@ -429,6 +455,10 @@ export default function DouyinSyncPage() {
               <TabsTrigger value="history">
                 <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
                 运行历史
+              </TabsTrigger>
+              <TabsTrigger value="library">
+                <Library className="mr-1.5 h-3.5 w-3.5" />
+                抖音选题库
               </TabsTrigger>
             </TabsList>
 
@@ -900,6 +930,54 @@ export default function DouyinSyncPage() {
                   ))}
                 </div>
               )}
+            </TabsContent>
+
+            {/* ----------------- 抖音选题库 ----------------- */}
+            <TabsContent value="library">
+              <Card>
+                <CardHeader>
+                  <CardTitle>抖音选题库</CardTitle>
+                  <CardDescription>
+                    从「素材池」选入选题库、来源为抖音同步的选题会集中展示在这里，可直接拿去生产。
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {dyLoading ? (
+                    <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" /> 加载中…
+                    </div>
+                  ) : dyTopics.length === 0 ? (
+                    <EmptyState
+                      icon={Bookmark}
+                      title="还没有从抖音沉淀的选题"
+                      description="在「素材池」勾选抖音视频，点「选入选题库」后，它们会出现在这里。"
+                      action={
+                        <Button size="sm" variant="outline" onClick={() => void loadDyTopics()}>
+                          <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> 刷新
+                        </Button>
+                      }
+                    />
+                  ) : (
+                    <div className="space-y-2">
+                      {dyTopics.map((t) => (
+                        <div
+                          key={t.id}
+                          className="flex flex-wrap items-center gap-2 rounded-lg border border-border px-3 py-2"
+                        >
+                          <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                            {t.title}
+                          </span>
+                          <Badge variant="muted">抖音同步</Badge>
+                          <Badge variant={dyStatusVariant(t.status)}>{t.status}</Badge>
+                          <span className="text-xs text-muted-foreground">
+                            {t.updated_at || t.created_at}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             </TabsContent>
           </Tabs>
         </>
