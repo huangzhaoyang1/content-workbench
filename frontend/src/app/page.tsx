@@ -5,10 +5,8 @@ import {
   ArrowRight,
   CheckCircle2,
   Clock,
-  FileText,
-  Lightbulb,
-  ShieldCheck,
-  Target,
+  Flame,
+  Video,
 } from "lucide-react";
 import { api, API_BASE } from "@/lib/api";
 import type { HistoryTask } from "@/lib/types";
@@ -20,39 +18,25 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 const IS_LOCAL_BACKEND = /^https?:\/\/(localhost|127\.0\.0\.1)/.test(API_BASE);
 
-// 核心流程四步（横向等宽主视觉）
-const FLOW_STEPS = [
+// 两条真实流水线（主视觉两大卡，各五步）
+const PIPELINES = [
   {
-    n: 1,
-    title: "拆解爆款",
-    desc: "把抖音爆款结构拆出来，迁移成公众号骨架。",
+    key: "douyin",
+    title: "抖音爆款 → 公众号",
+    desc: "贴一条抖音爆款，拆成骨架，走完选题 / 生成 / 封面，进公众号草稿箱。",
+    icon: Video,
+    steps: ["拆解视频", "生成选题", "生成内容", "确认封面期数", "发布草稿箱"],
     href: "/dissect",
     cta: "去拆解",
-    icon: Target,
   },
   {
-    n: 2,
-    title: "选入选题",
-    desc: "一句话主题生成候选选题，挑一个跑流水线。",
-    href: "/topic",
-    cta: "去选题",
-    icon: Lightbulb,
-  },
-  {
-    n: 3,
-    title: "生成文章",
-    desc: "一键跑完整流水线，产出成稿、封面与草稿。",
-    href: "/tasks",
-    cta: "发起出稿",
-    icon: FileText,
-  },
-  {
-    n: 4,
-    title: "审核发布",
-    desc: "对待审核成稿做最终确认，再推送到公众号。",
-    href: "/tasks?review=1",
-    cta: "去审核",
-    icon: ShieldCheck,
+    key: "hotspot",
+    title: "热点 → 公众号",
+    desc: "搜当前热点，挑一个方向，走完生成 / 封面，进公众号草稿箱。",
+    icon: Flame,
+    steps: ["搜索热点", "选择热点选题", "生成内容", "确认封面期数", "发布草稿箱"],
+    href: "/hotspot",
+    cta: "去搜热点",
   },
 ] as const;
 
@@ -129,7 +113,7 @@ export default function DashboardPage() {
     <PageShell>
       <PageHeader
         title={greeting ? `${greeting}，${name}` : `你好，${name}`}
-        description="把抖音爆款拆成骨架，变成你的公众号文章"
+        description="抖音爆款或热点，都能变成你的公众号文章"
         actions={
           online === null ? (
             <Skeleton className="h-6 w-20" />
@@ -178,45 +162,59 @@ export default function DashboardPage() {
         </span>
       </div>
 
-      {/* 主视觉：核心流程四步，横向等宽大卡 + → 串联 */}
-      <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-stretch">
-        {FLOW_STEPS.map((s, i) => {
-          const Icon = s.icon;
+      {/* 主视觉：两条真实流水线，两大卡横排，各五步流程徽标串联 */}
+      <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+        {PIPELINES.map((p) => {
+          const Icon = p.icon;
           return (
-            <React.Fragment key={s.n}>
-              <Card className="flex flex-1 flex-col border-sidebar-primary/20 bg-sidebar-primary/[0.03]">
-                <CardContent className="flex h-full flex-col gap-3 p-5">
-                  <div className="flex items-center gap-2">
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sidebar-primary/15 text-lg font-bold text-sidebar-primary">
-                      {s.n}
-                    </span>
-                    <Icon className="h-5 w-5 text-sidebar-primary" />
-                  </div>
-                  <h3 className="text-base font-semibold">{s.title}</h3>
-                  <p
-                    className="truncate text-sm text-muted-foreground"
-                    title={s.desc}
-                  >
-                    {s.desc}
-                  </p>
-                  <LinkButton href={s.href} className="mt-auto w-full">
-                    {s.cta}
-                    <ArrowRight className="h-4 w-4" />
-                  </LinkButton>
-                </CardContent>
-              </Card>
-              {i < FLOW_STEPS.length - 1 && (
-                <div className="flex items-center justify-center md:px-1">
-                  <ArrowRight className="h-5 w-5 rotate-90 text-muted-foreground/50 md:rotate-0" />
+            <Card
+              key={p.key}
+              className="flex flex-col border-sidebar-primary/20 bg-sidebar-primary/[0.03]"
+            >
+              <CardContent className="flex h-full flex-col gap-4 p-5">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sidebar-primary/15 text-sidebar-primary">
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <h3 className="text-base font-semibold">{p.title}</h3>
                 </div>
-              )}
-            </React.Fragment>
+                {/* 五步流程徽标：灰底小标签，→ 串联，一眼看到「五步走完」 */}
+                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-2">
+                  {p.steps.map((s, i) => (
+                    <React.Fragment key={s}>
+                      <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                        {s}
+                      </span>
+                      {i < p.steps.length - 1 && (
+                        <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />
+                      )}
+                    </React.Fragment>
+                  ))}
+                </div>
+                <p className="text-sm leading-relaxed text-muted-foreground">
+                  {p.desc}
+                </p>
+                <LinkButton href={p.href} className="mt-auto w-full">
+                  {p.cta}
+                  <ArrowRight className="h-4 w-4" />
+                </LinkButton>
+              </CardContent>
+            </Card>
           );
         })}
       </div>
 
+      {/* 两线归一：最终都在「出稿与审核」完成确认与发布 */}
+      <p className="mt-4 text-center text-xs text-muted-foreground">
+        两条线最终都在
+        <LinkButton href="/tasks" variant="link" size="sm" className="px-1">
+          出稿与审核
+        </LinkButton>
+        完成确认与发布。
+      </p>
+
       {/* 历史产出：首页仅留一条细链接，避免首屏堆叠 */}
-      <div className="mt-8 flex justify-end">
+      <div className="mt-6 flex justify-end">
         <LinkButton href="/tasks" variant="ghost" size="sm">
           查看全部历史
           <ArrowRight className="h-3 w-3" />

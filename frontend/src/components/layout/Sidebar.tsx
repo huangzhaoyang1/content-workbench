@@ -211,7 +211,7 @@ function SidebarBody({
         </div>
       </nav>
       <div className="border-t border-sidebar-border px-5 py-3 text-[11px] leading-relaxed text-muted-foreground">
-        把抖音爆款拆成骨架，变成你的公众号文章
+        抖音爆款或热点，都能变成你的公众号文章
       </div>
     </div>
   );
