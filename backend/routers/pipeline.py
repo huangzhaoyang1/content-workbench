@@ -67,6 +67,19 @@ def pipeline_publish(body: PipelineIssueReq) -> dict:
         raise HTTPException(status_code=503, detail=str(e)) from e
 
 
+@router.post("/pipeline/regenerate-cover")
+def pipeline_regenerate_cover(body: PipelineIssueReq) -> dict:
+    """仅重画封面（不推送公众号），返回 {ok, cover_base64} 或 {ok:false, reason}。
+
+    用于确认发布对话框的「生成封面预览」：实时按用户在输入框里实际输入的
+    封面期号标识重画，让预览所见即所得。
+    """
+    try:
+        return pipeline.regenerate_cover(body.issue, cover_label=body.cover_label)
+    except pipeline.PipelineUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+
+
 @router.post("/pipeline/discard")
 def pipeline_discard(body: PipelineIssueReq) -> dict:
     """把「待审核」的某期标记为放弃（只改本地状态，不调微信）。"""

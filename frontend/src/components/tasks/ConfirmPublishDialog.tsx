@@ -54,15 +54,16 @@ export function ConfirmPublishDialog({
     setPreviewError(null);
     setCoverReady(false);
     try {
-      const detail = await api.taskDetail(issue);
-      if (detail.cover_base64) {
-        setCoverSrc(detail.cover_base64);
+      // 真正按用户在输入框里实际输入的 label 重画封面，避免预览与最终发布不一致
+      const res = await api.regenerateCover(issue, label.trim());
+      if (res.ok && res.cover_base64) {
+        setCoverSrc(res.cover_base64);
         setCoverReady(true);
       } else {
-        setPreviewError("本期还没有封面图（可能生产未完成），可直接发布后再补。");
+        setPreviewError(res.reason || "封面预览生成失败");
       }
     } catch (e) {
-      setPreviewError(friendlyMessage(e, "封面预览加载失败"));
+      setPreviewError(friendlyMessage(e, "封面预览生成失败"));
     } finally {
       setPreviewLoading(false);
     }

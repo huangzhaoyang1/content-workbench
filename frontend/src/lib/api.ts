@@ -276,6 +276,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ issue, cover_label: coverLabel }),
     }),
+  /** 仅重画封面（不推送），返回新封面 base64。用于确认发布对话框「生成封面预览」实时反映用户输入的封面期号。 */
+  regenerateCover: (issue: number, coverLabel = "") =>
+    request<{ ok: boolean; cover_base64?: string; reason?: string; stderr?: string }>(
+      "/api/pipeline/regenerate-cover",
+      {
+        method: "POST",
+        body: JSON.stringify({ issue, cover_label: coverLabel }),
+      },
+    ),
   /** 放弃待审核的某期（只改本地状态，不调微信）。 */
   discardPipeline: (issue: number) =>
     request<{ ok: boolean; reason?: string }>("/api/pipeline/discard", {

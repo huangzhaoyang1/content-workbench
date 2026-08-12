@@ -9,8 +9,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
+import subprocess
 import sys
 import threading
 import uuid
@@ -290,6 +292,44 @@ def publish(issue: int, cover_label: str = "") -> dict:
     threading.Thread(target=_run_sync, args=(task_id, cmd), daemon=True).start()
     _persist()
     return {"task_id": task_id, "issue": issue}
+
+
+def regenerate_cover(issue: int, cover_label: str = "") -> dict:
+    """仅重画封面（不重写文章、不推送公众号），返回新封面 base64。
+
+    cover_label 非空时覆盖默认「第N期」（用户在确认发布对话框实际输入的期号）。
+    同步调用 run_pipeline.py --regenerate-cover；图像生成通常 5-30s，超时 120s 兜底。
+    用于工作台「生成封面预览」按钮实时反映用户输入的封面期号。
+    """
+    avail = availability()
+    if not avail["available"]:
+        return {"ok": False, "reason": f"流水线不可用：{avail.get('reason', '未知')}"}
+    issue_dir = settings.streamlit_root / "data" / "issues" / str(issue)
+    if not (issue_dir / "result.json").exists():
+        return {"ok": False, "reason": f"找不到第 {issue} 期 result.json"}
+    cfg = load_config()
+    py = cfg.get("python_path") or "python"
+    script = settings.scripts_dir / "run_pipeline.py"
+    cmd = [py, str(script), "--issue", str(issue), "--regenerate-cover"]
+    if cover_label and cover_label.strip():
+        cmd += ["--cover-label", cover_label.strip()]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "reason": "封面生成超时（>120s）"}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "reason": f"启动失败：{type(e).__name__}: {e}"}
+    if proc.returncode != 0:
+        stderr_tail = (proc.stderr or "")[-500:]
+        return {"ok": False, "reason": f"封面生成失败（exit {proc.returncode}）", "stderr": stderr_tail}
+    cover_path = issue_dir / "cover.png"
+    if not cover_path.exists():
+        return {"ok": False, "reason": "封面文件未生成"}
+    try:
+        b64 = base64.b64encode(cover_path.read_bytes()).decode("ascii")
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "reason": f"读取封面失败：{type(e).__name__}: {e}"}
+    return {"ok": True, "cover_base64": f"data:image/png;base64,{b64}"}
 
 
 def discard(issue: int) -> dict:
