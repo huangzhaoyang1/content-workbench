@@ -19,6 +19,7 @@ from datetime import datetime
 from ..system.config import settings, load_config, DATA_DIR, atomic_write_json
 from ..data.preferences import load_preferences
 from ..data.retrieval import search as retrieval_search
+from .quality import score_article, QUALITY_THRESHOLD
 
 # 任务存储：热数据在内存 _TASKS，持久化到 DATA_DIR/tasks.json
 _TASKS: dict[str, dict] = {}
@@ -308,6 +309,46 @@ def discard(issue: int) -> dict:
         return {"ok": False, "reason": str(e)}
 
 
+def _attach_quality(issue: int) -> None:
+    """审核流：对产出文章本地打分，把质量分写入该期 result.json 的 quality 字段。
+
+    仅在 review 任务（--no-publish 出草稿）产出成功后调用，作为「确认发布」前的
+    决策支持——不自动拦截，最终闸门是用户的确认发布 / 放弃。
+    任何读取 / 打分 / 落盘异常都静默跳过，绝不阻塞或拖垮审核流。
+    """
+    issues_dir = settings.streamlit_root / "data" / "issues" / str(issue)
+    rp = issues_dir / "result.json"
+    if not rp.exists():
+        return
+    try:
+        with open(rp, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return
+    # 文章正文：优先 result.json 的 article_md（相对 streamlit_root），否则退化为 article.md
+    art_rel = data.get("article_md")
+    art_path = (settings.streamlit_root / art_rel) if art_rel else (issues_dir / "article.md")
+    text = ""
+    if art_path.exists():
+        try:
+            text = art_path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            text = ""
+    if not text:
+        return
+    try:
+        score = score_article(text)
+    except Exception:
+        return
+    score["threshold"] = QUALITY_THRESHOLD
+    score["meets_threshold"] = bool(score.get("total", 0) >= QUALITY_THRESHOLD)
+    data["quality"] = score
+    try:
+        atomic_write_json(rp, data)
+    except Exception as e:  # noqa: BLE001
+        print(f"[pipeline] 质量分写入 result.json 失败（issue={issue}）：{e}", file=sys.stderr)
+
+
 async def _run(task_id: str, cmd: list[str]) -> None:
     _ensure_loaded()
     task = _TASKS.get(task_id)
@@ -336,6 +377,12 @@ async def _run(task_id: str, cmd: list[str]) -> None:
         task["error"] = str(e)
         task["logs"].append(f"[error] {e}")
     task["finished_at"] = _now()
+    # 审核流：review 任务产出成功后，本地打分并写入 result.json（决策支持，不自动拦截）
+    if task.get("status") == "success" and task.get("review"):
+        try:
+            _attach_quality(task["issue"])
+        except Exception as e:  # noqa: BLE001
+            print(f"[pipeline] 审核质量打分跳过（issue={task['issue']}）：{e}", file=sys.stderr)
     _persist()
 
 

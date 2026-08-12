@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Tag,
   XCircle,
+  AlertTriangle,
 } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { api, friendlyMessage } from "@/lib/api";
 import type { HistoryDetail } from "@/lib/types";
+import { QualityScoreCard } from "@/components/dissect/QualityScoreCard";
 import {
   TaskStatusBadge,
   fmtDuration,
@@ -173,6 +175,54 @@ export function TaskDetailDialog({
                   <span className="text-xs text-muted-foreground">
                     文章与封面已就绪但未推送，审核后点「确认发布」推到公众号草稿箱。
                   </span>
+                </div>
+                <div className="mt-2">
+                  {detail.quality ? (
+                    <>
+                      <QualityScoreCard quality={detail.quality} />
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <Badge
+                          variant={
+                            detail.quality.meets_threshold ? "success" : "destructive"
+                          }
+                        >
+                          发布门槛 {detail.quality.threshold} ·{" "}
+                          {detail.quality.meets_threshold ? "达标" : "未达标"}
+                        </Badge>
+                        {detail.quality.block && (
+                          <Badge variant="destructive">
+                            <AlertTriangle className="mr-1 h-3 w-3" />
+                            命中违禁词
+                          </Badge>
+                        )}
+                      </div>
+                      {detail.quality.block && (
+                        <div className="mt-2 rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-2 text-xs text-destructive">
+                          <div className="font-medium">
+                            ⚠️ 合规风险：命中以下违禁词，建议修改后重新生成
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {detail.quality.forbidden_words.map((h, i) => (
+                              <Badge
+                                key={i}
+                                variant="outline"
+                                className="text-[10px]"
+                              >
+                                {h.word}
+                                <span className="ml-1 text-muted-foreground">
+                                  {h.category}
+                                </span>
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+                      该期未生成质量评分（可能是本次改动前产出的草稿）。请直接阅读正文判断。
+                    </div>
+                  )}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <Button size="sm" onClick={onConfirmPublish} disabled={reviewBusy}>

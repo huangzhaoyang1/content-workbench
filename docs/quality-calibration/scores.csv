@@ -1,0 +1,12 @@
+﻿﻿编号,来源,类型,标题,字数,格式分,有料分,情绪分,传播分,总分,命中违禁词
+1,side-hustle/data/issues/1/article.md,topic文章(issue-1) [生成失败残稿],中国AI大模型周调用量连续十五周超美国：真实踩坑篇,444,9.5,7.9,8.8,0,26.2,
+2,side-hustle/data/issues/2/article.md,topic文章(issue-2),中国AI大模型周调用量连续十五周超美国：真实踩坑篇,1237,5.0,14.5,17.0,7.0,43.5,
+3,side-hustle/data/issues/3/article.md,topic文章(issue-3),(无标题),1834,6.6,3.0,9.5,5.0,24.1,
+4,backend/data/topic_library.json,topic文章(选题库),别再刷Codex对话了，我搞了个看板来管它,1434,24.6,7.6,16.0,10.0,58.2,二维码
+5,data/issues/issue-2026-07-30.md,newsletter(历史周刊),扬的AI学习日记 · 2026年07月30日,2368,10.5,17.0,5.5,5.0,38.0,
+6,data/issues/issue-2026-07-31.md,newsletter(历史周刊),扬的AI学习日记 · 2026年07月31日,1902,12.2,12.0,5.5,10.0,39.7,最大
+7,data/issues/issue-2026-08-10.md,newsletter(历史周刊),扬的AI学习日记 · 2026年08月10日,1886,13.0,12.2,4.2,5.0,34.4,
+8,content/AI周刊第2期.md,newsletter(周刊),AI周刊第2期｜扬的AI学习日记,2941,5.5,18.0,14.5,0,38.0,最大;最高;最佳
+9,content/MicrosoftToDo接入指南.md,指南文章,Microsoft To Do 接入指南（扬的AI学习日记）,2036,6.5,11.8,6.0,5.0,29.3,机密
+10,data/issues/_layout_showcase.md,布局展示(疑模板),第二节排版展示（5 种结构逐期轮换）,4931,7.7,14.0,12.7,5.0,39.4,最大;微信
+11,content/发刊词与选题库.md,发刊词,小报童发刊词 + 前 20 个选题库,2264,10.5,18.0,9.5,13.0,51.0,最高

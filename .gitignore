@@ -59,3 +59,10 @@ _fix_imports.py
 backend/_tmp_fmt_test.py
 frontend/.next/
 frontend/tsconfig.tsbuildinfo
+
+# ===================== 项目清理：忽略项 =====================
+.workbuddy/
+_archive_junk/
+backend/_archive_junk/
+*.bat
+*.lnk

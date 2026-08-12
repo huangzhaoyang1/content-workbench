@@ -173,6 +173,7 @@ def _read_one_issue(issue_dir: Path, issue_no: int, tag_map: dict) -> tuple[dict
             "started_at": started_at,
             "duration_sec": duration,
             "tags": list(tag_map.get(str(issue_no), [])),
+            "quality": rj.get("quality"),
         }
         return task, None
     except Exception as e:
@@ -356,6 +357,7 @@ def get_task_detail(issue: int) -> dict | None:
         "completed_at": completed_at,
         "duration_sec": duration,
         "tags": get_task_tags(issue),
+        "quality": rj.get("quality"),
         "article_preview": None,
         "cover_base64": None,
     }

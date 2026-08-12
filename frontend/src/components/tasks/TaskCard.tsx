@@ -126,6 +126,19 @@ export function TaskCard({
                     : task.draft_status}
                 </Badge>
               )}
+              {task.quality && task.draft_status === "PENDING_REVIEW" && (
+                <Badge
+                  variant={task.quality.meets_threshold ? "success" : "destructive"}
+                  title={
+                    `质量总分 ${task.quality.total} / 门槛 ${task.quality.threshold}` +
+                    (task.quality.block ? " · 命中违禁词" : "")
+                  }
+                >
+                  {task.quality.block
+                    ? "⚠ 违禁"
+                    : `质量 ${task.quality.total}`}
+                </Badge>
+              )}
               {task.tags && task.tags.length > 0 && (
                 <span className="inline-flex flex-wrap gap-1 align-middle">
                   {task.tags.map((t) => (

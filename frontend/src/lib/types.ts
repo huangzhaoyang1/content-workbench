@@ -186,6 +186,7 @@ export interface HistoryTask {
   duration_sec: number | null;
   tags?: string[];
   trashed?: boolean;
+  quality?: QualityScore | null;
 }
 
 export interface HistoryStats {
@@ -667,10 +668,14 @@ export interface QualityDimension {
 }
 export interface QualityScore {
   total: number;
-  grade: "优秀" | "合格" | "待打磨" | "不合格" | string;
+  grade: "优秀" | "合格" | "待打磨" | "不合格" | "BLOCK" | string;
+  block: boolean;
+  forbidden_words: Array<{ word: string; category: string }>;
   dimensions: QualityDimension[];
   weakest: string;
   advice: string[];
+  threshold: number;
+  meets_threshold: boolean;
 }
 
 export type RewriteAngleKey = "pitfall" | "howto" | "insight";
