@@ -50,7 +50,6 @@ interface Theme {
 const SANS =
   '-apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", system-ui, sans-serif';
 const SERIF = 'Georgia, "Times New Roman", "Songti SC", "STSong", "Noto Serif SC", serif';
-const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
 
 const THEMES: Record<ThemeKey, Theme> = {
   // 极简商务：瑞士风，单一蓝强调色，大量留白，最接近原默认观感

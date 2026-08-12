@@ -13,7 +13,6 @@ import {
   Target,
   Bookmark,
   FileText,
-  ShieldCheck,
   ChevronDown,
   Menu,
   X,
@@ -30,37 +29,38 @@ interface NavItem {
   activeWhen?: (pathname: string, review: boolean) => boolean;
 }
 
-// 第一级：核心流程（置顶，图标 + 大字号）
+// 独立一级：工作台（仅此项，置顶）
+const WORKBENCH: NavItem = {
+  href: "/",
+  label: "工作台",
+  icon: LayoutDashboard,
+  desc: "流程总入口",
+};
+
+// 核心流程（图标 + 大字号）
 const CORE: NavItem[] = [
-  { href: "/", label: "工作台", icon: LayoutDashboard, desc: "今日概览 · 核心流程" },
   { href: "/dissect", label: "拆解", icon: Target, desc: "抖音爆款 → 公众号" },
   { href: "/topic", label: "选题", icon: Lightbulb, desc: "生成选题 · 跑流水线" },
   {
     href: "/tasks",
-    label: "出稿",
+    label: "出稿与审核",
     icon: FileText,
-    desc: "发起生产 · 历史产出",
-    activeWhen: (p, review) => p === "/tasks" && !review,
-  },
-  {
-    href: "/tasks?review=1",
-    label: "审核",
-    icon: ShieldCheck,
-    desc: "待审核任务 · 发布",
-    activeWhen: (p, review) => p === "/tasks" && review,
+    desc: "发起生产 · 待审核",
+    // /tasks 同时承载出稿与审核（?review=1 为审核模式），两种状态都高亮
+    activeWhen: (p) => p === "/tasks",
   },
 ];
 
-// 第二级：更多（折叠组，默认收起）
+// 更多（折叠组，默认收起）
 const MORE: NavItem[] = [
   { href: "/hotspot", label: "热点", icon: Flame, desc: "搜索与洞察" },
-  { href: "/queue", label: "队列", icon: ListChecks, desc: "批量排期 · 定时" },
-  { href: "/analytics", label: "数据分析", icon: BarChart3, desc: "复盘 · 找方向" },
-  { href: "/douyin-sync", label: "抖音同步", icon: Bookmark, desc: "收藏夹 → 素材池" },
+  { href: "/queue", label: "队列", icon: ListChecks, desc: "批量排期" },
+  { href: "/analytics", label: "数据分析", icon: BarChart3, desc: "复盘找方向" },
+  { href: "/douyin-sync", label: "抖音同步", icon: Bookmark, desc: "收藏夹同步" },
   { href: "/config", label: "设置", icon: Settings, desc: "密钥与参数" },
 ];
 
-const ALL = [...CORE, ...MORE];
+const ALL = [WORKBENCH, ...CORE, ...MORE];
 
 function isActive(item: NavItem, pathname: string, review: boolean): boolean {
   if (item.activeWhen) return item.activeWhen(pathname, review);
@@ -184,8 +184,16 @@ function SidebarBody({
   return (
     <div className="flex h-full flex-col">
       <Brand />
-      {/* 核心流程：置顶，图标 + 大字号 */}
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3">
+      {/* 工作台：独立一级，置顶 */}
+      <nav className="flex-1 space-y-1 overflow-y-auto px-3 pt-1">
+        <NavLink
+          item={WORKBENCH}
+          active={isActive(WORKBENCH, pathname, review)}
+          onNavigate={onNavigate}
+          size="core"
+        />
+        <div className="my-2 border-t border-sidebar-border/60" />
+        {/* 核心流程：图标 + 大字号 */}
         <div className="px-3 pb-1 pt-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/50">
           核心流程
         </div>
@@ -202,8 +210,8 @@ function SidebarBody({
           <MoreGroup pathname={pathname} review={review} onNavigate={onNavigate} />
         </div>
       </nav>
-      <div className="border-t border-sidebar-border px-5 py-3 text-[11px] text-muted-foreground">
-        本地生活短视频 · 内容生产流水线
+      <div className="border-t border-sidebar-border px-5 py-3 text-[11px] leading-relaxed text-muted-foreground">
+        把抖音爆款拆成骨架，变成你的公众号文章
       </div>
     </div>
   );

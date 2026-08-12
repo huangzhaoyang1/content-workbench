@@ -13,7 +13,6 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
-  Tag,
   Timer,
   Trash2,
   Undo2,

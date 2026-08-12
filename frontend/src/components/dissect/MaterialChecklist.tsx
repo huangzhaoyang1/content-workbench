@@ -76,11 +76,6 @@ const LISTS: {
   },
 ];
 
-function countOf(materials: DissectMaterials, key: ListKey): number {
-  const v = materials[key];
-  return Array.isArray(v) ? v.length : 0;
-}
-
 /** 单条素材的渲染：不同类型的清单用稍微不同的视觉强调。 */
 function renderItem(key: ListKey, item: unknown, i: number): React.ReactNode {
   if (key === "views") {

@@ -96,7 +96,6 @@ export default function DouyinSyncPage() {
   const [filterKeyword, setFilterKeyword] = React.useState("");
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
-  const [clearStatus, setClearStatus] = React.useState("");
   const [confirmClear, setConfirmClear] = React.useState<null | "" | "ignored">(null);
   const [clearing, setClearing] = React.useState(false);
 
