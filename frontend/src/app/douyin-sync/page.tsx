@@ -34,6 +34,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
 import { useRouter } from "next/navigation";
 import { api, friendlyMessage } from "@/lib/api";
+import { DissectPanel } from "@/components/dissect/DissectPanel";
 import type {
   DouyinSyncState,
   DouyinSyncConfig,
@@ -77,6 +78,7 @@ export default function DouyinSyncPage() {
   const [error, setError] = React.useState<string | null>(null);
   const [state, setState] = React.useState<DouyinSyncState | null>(null);
   const [tab, setTab] = React.useState("config");
+  const [outerTab, setOuterTab] = React.useState("dissect");
 
   // 配置编辑态
   const [cfg, setCfg] = React.useState<Partial<DouyinSyncConfig>>({});
@@ -356,11 +358,22 @@ export default function DouyinSyncPage() {
   return (
     <PageShell width="xl">
       <PageHeader
-        title="🔖 抖音收藏同步"
-        description="把抖音主页 / 收藏夹里的视频自动抓成素材池：定时跑、可筛选，勾选后一键进选题库。"
+        title="抖音线"
+        description="抖音爆款两条路：即时拆解爆款文案一键成稿，或把收藏夹沉淀成素材池。"
       />
 
-      {loading && (
+      <Tabs defaultValue="dissect" value={outerTab} onValueChange={setOuterTab} className="mt-5">
+        <TabsList className="flex-wrap">
+          <TabsTrigger value="dissect">① 即时拆解</TabsTrigger>
+          <TabsTrigger value="sync">② 收藏沉淀</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="dissect">
+          <DissectPanel />
+        </TabsContent>
+
+        <TabsContent value="sync">
+          {loading && (
         <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-border px-6 py-12 text-sm text-muted-foreground">
           <Loader2 className="h-5 w-5 animate-spin" /> 正在读取状态…
         </div>
@@ -891,6 +904,8 @@ export default function DouyinSyncPage() {
           </Tabs>
         </>
       )}
+        </TabsContent>
+      </Tabs>
 
       {/* 清空确认 */}
       <ConfirmDialog

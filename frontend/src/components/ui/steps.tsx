@@ -11,14 +11,19 @@ interface StepsProps {
   steps: StepDef[];
   /** 当前所处步骤下标（0 起）；等于 steps.length 表示全部完成 */
   current: number;
-  /** 当前步骤是否正在进行中（显示转圈） */
+  /** 当前步骤是否正在进行中（显示转圈 + 琥珀流光） */
   running?: boolean;
   /** 当前步骤是否失败（显示红色） */
   failed?: boolean;
   className?: string;
 }
 
-/** 横向步骤指示器：已完成打勾、进行中转圈、未开始灰色。 */
+/** 横向步骤指示器：
+ *  - 已完成：绿色打勾 + 整体完成时绿色呼吸（breathe）
+ *  - 进行中：琥珀金流光（flow）+ 转圈
+ *  - 未开始：灰
+ *  - 失败：红
+ */
 export function Steps({
   steps,
   current,
@@ -26,6 +31,7 @@ export function Steps({
   failed = false,
   className,
 }: StepsProps) {
+  const allDone = current >= steps.length;
   return (
     <ol className={cn("flex items-center gap-1 overflow-x-auto", className)}>
       {steps.map((s, i) => {
@@ -39,8 +45,16 @@ export function Steps({
                 className={cn(
                   "flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[11px] font-medium transition-colors",
                   done &&
-                    "border-emerald-500/50 bg-emerald-500/15 text-emerald-400",
+                    cn(
+                      "border-success/50 bg-success/15 text-success",
+                      allDone && "animate-breathe"
+                    ),
                   active &&
+                    running &&
+                    !isFailed &&
+                    "border-warning bg-gradient-to-r from-warning/25 via-warning/55 to-warning/25 bg-[length:200%_100%] text-warning animate-flow",
+                  active &&
+                    !running &&
                     !isFailed &&
                     "border-sidebar-primary bg-sidebar-primary/15 text-sidebar-primary",
                   isFailed && "border-destructive bg-destructive/15 text-destructive",
@@ -71,7 +85,7 @@ export function Steps({
               <span
                 className={cn(
                   "h-px min-w-3 flex-1 transition-colors",
-                  done ? "bg-emerald-500/40" : "bg-border"
+                  done ? "bg-success/40" : "bg-border"
                 )}
               />
             )}

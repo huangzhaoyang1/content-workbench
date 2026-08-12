@@ -1,13 +1,7 @@
 "use client";
 
 import * as React from "react";
-import {
-  ArrowRight,
-  CheckCircle2,
-  Clock,
-  Flame,
-  Video,
-} from "lucide-react";
+import { ArrowRight, CheckCircle2, Clock } from "lucide-react";
 import { api, API_BASE } from "@/lib/api";
 import type { HistoryTask } from "@/lib/types";
 import { PageShell, PageHeader } from "@/components/layout/PageShell";
@@ -15,30 +9,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { LinkButton } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { MarkDouyin, MarkHotspot, MarkEmpty } from "@/components/brand/marks";
 
 const IS_LOCAL_BACKEND = /^https?:\/\/(localhost|127\.0\.0\.1)/.test(API_BASE);
-
-// 两条真实流水线（主视觉两大卡，各五步）
-const PIPELINES = [
-  {
-    key: "douyin",
-    title: "抖音爆款 → 公众号",
-    desc: "贴一条抖音爆款，拆成骨架，走完选题 / 生成 / 封面，进公众号草稿箱。",
-    icon: Video,
-    steps: ["拆解视频", "生成选题", "生成内容", "确认封面期数", "发布草稿箱"],
-    href: "/dissect",
-    cta: "去拆解",
-  },
-  {
-    key: "hotspot",
-    title: "热点 → 公众号",
-    desc: "搜当前热点，挑一个方向，走完生成 / 封面，进公众号草稿箱。",
-    icon: Flame,
-    steps: ["搜索热点", "选择热点选题", "生成内容", "确认封面期数", "发布草稿箱"],
-    href: "/hotspot",
-    cta: "去搜热点",
-  },
-] as const;
 
 function isSameDay(v: string | null): boolean {
   if (!v) return false;
@@ -50,6 +23,23 @@ function isSameDay(v: string | null): boolean {
     d.getMonth() === now.getMonth() &&
     d.getDate() === now.getDate()
   );
+}
+
+/** 把任务状态映射成中文标签（含待审核）。 */
+function statusLabel(t: HistoryTask): string {
+  if (t.draft_status === "PENDING_REVIEW") return "审核中";
+  switch (t.status) {
+    case "ok":
+      return "已完成";
+    case "error":
+      return "失败";
+    case "running":
+      return "生产中";
+    case "waiting":
+      return "排队中";
+    default:
+      return "未知";
+  }
 }
 
 export default function DashboardPage() {
@@ -68,31 +58,24 @@ export default function DashboardPage() {
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
-      // 账号名（鉴权开启时取 realm，否则用默认）
       try {
         const auth = await api.authStatus();
         if (auth.realm) setName(auth.realm);
       } catch {
         /* 取不到就用默认名 */
       }
-
-      // 历史任务：一条请求派生「待审核数 / 今日任务」
       try {
         const res = await api.listTasks({ page: 1, page_size: 20 });
         if (!cancelled) setTasks(res.tasks);
       } catch {
         if (!cancelled) setTasks(null);
       }
-
-      // 素材库（选题库）总条数
       try {
         const lib = await api.dissectListTopics(1);
         if (!cancelled) setMaterialTotal(lib.total);
       } catch {
         if (!cancelled) setMaterialTotal(null);
       }
-
-      // 后端在线状态（轻量探测）
       try {
         await api.health();
         if (!cancelled) setOnline(true);
@@ -108,6 +91,11 @@ export default function DashboardPage() {
   const pendingReview =
     tasks?.filter((t) => t.draft_status === "PENDING_REVIEW").length ?? null;
   const todayTasks = tasks?.filter((t) => isSameDay(t.completed_at)).length ?? null;
+  const latest = tasks?.[0] ?? null;
+  const firstRun =
+    !tasks && materialTotal === null
+      ? false
+      : (tasks?.length ?? 0) === 0 && (materialTotal ?? 0) === 0;
 
   return (
     <PageShell>
@@ -140,80 +128,148 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* 顶部紧凑指标（占位小，不抢主视觉） */}
+      {/* 顶部紧凑指标（不抢主视觉） */}
       <div className="mt-5 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-        <span className="text-muted-foreground">
+        <span className="text-ink-2">
           待审核
-          <span className="ml-1.5 font-semibold text-foreground">
-            {pendingReview ?? "—"}
-          </span>
+          <span className="ml-1.5 font-semibold text-ink">{pendingReview ?? "—"}</span>
         </span>
-        <span className="text-muted-foreground">
+        <span className="text-ink-2">
           今日完成
-          <span className="ml-1.5 font-semibold text-foreground">
-            {todayTasks ?? "—"}
-          </span>
+          <span className="ml-1.5 font-semibold text-ink">{todayTasks ?? "—"}</span>
         </span>
-        <span className="text-muted-foreground">
+        <span className="text-ink-2">
           素材库
-          <span className="ml-1.5 font-semibold text-foreground">
-            {materialTotal ?? "—"}
-          </span>
+          <span className="ml-1.5 font-semibold text-ink">{materialTotal ?? "—"}</span>
         </span>
       </div>
 
-      {/* 主视觉：两条真实流水线，两大卡横排，各五步流程徽标串联 */}
-      <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
-        {PIPELINES.map((p) => {
-          const Icon = p.icon;
-          return (
-            <Card
-              key={p.key}
-              className="flex flex-col border-sidebar-primary/20 bg-sidebar-primary/[0.03]"
-            >
-              <CardContent className="flex h-full flex-col gap-4 p-5">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sidebar-primary/15 text-sidebar-primary">
-                    <Icon className="h-5 w-5" />
-                  </span>
-                  <h3 className="text-base font-semibold">{p.title}</h3>
+      {/* 主视觉：两条真实流水线，左右两大卡等高 */}
+      {firstRun ? (
+        <Card className="mt-6 flex flex-col items-center gap-4 px-6 py-12 text-center">
+          <MarkEmpty className="h-16 w-16 text-ink-3" />
+          <div>
+            <p className="text-base font-medium text-ink">库里还没货</p>
+            <p className="mt-1 text-sm text-ink-2">
+              先去拆一条抖音爆款，或搜一波热点，把素材攒起来。
+            </p>
+          </div>
+          <LinkButton href="/dissect" className="mt-1">
+            去拆解一条爆款
+            <ArrowRight className="h-4 w-4" />
+          </LinkButton>
+        </Card>
+      ) : (
+        <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {/* 卡A：抖音线 */}
+          <Card className="flex flex-col border-subtle bg-surface">
+            <CardContent className="flex h-full flex-col gap-4 p-5">
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
+                  <MarkDouyin className="h-6 w-6" />
+                </span>
+                <div>
+                  <h3 className="text-base font-semibold text-ink">抖音线</h3>
+                  <p className="text-xs text-ink-2">抖音爆款 → 公众号</p>
                 </div>
-                {/* 五步流程徽标：灰底小标签，→ 串联，一眼看到「五步走完」 */}
-                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-2">
-                  {p.steps.map((s, i) => (
-                    <React.Fragment key={s}>
-                      <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-                        {s}
-                      </span>
-                      {i < p.steps.length - 1 && (
-                        <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />
-                      )}
-                    </React.Fragment>
-                  ))}
-                </div>
-                <p className="text-sm leading-relaxed text-muted-foreground">
-                  {p.desc}
-                </p>
-                <LinkButton href={p.href} className="mt-auto w-full">
-                  {p.cta}
-                  <ArrowRight className="h-4 w-4" />
-                </LinkButton>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
+              </div>
 
-      {/* 两线归一：最终都在「出稿与审核」完成确认与发布 */}
-      <p className="mt-4 text-center text-xs text-muted-foreground">
-        两条线最终都在
+              <div className="grid grid-cols-2 gap-2">
+                <LinkButton
+                  href="/dissect"
+                  variant="outline"
+                  className="justify-start"
+                >
+                  即时拆解
+                </LinkButton>
+                <LinkButton
+                  href="/douyin-sync"
+                  variant="outline"
+                  className="justify-start"
+                >
+                  收藏沉淀
+                </LinkButton>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                <span className="text-ink-2">
+                  库内{" "}
+                  <span className="font-semibold text-ink">
+                    {materialTotal ?? "—"}
+                  </span>{" "}
+                  个选题
+                </span>
+                {latest && (
+                  <span className="text-ink-2">
+                    当前进度：
+                    <span className="font-medium text-ink">
+                      第{latest.issue}期 · {statusLabel(latest)}
+                    </span>
+                  </span>
+                )}
+              </div>
+
+              <LinkButton href="/dissect" className="mt-auto w-full">
+                去拆解
+                <ArrowRight className="h-4 w-4" />
+              </LinkButton>
+            </CardContent>
+          </Card>
+
+          {/* 卡B：热点线（主用，琥珀金描边） */}
+          <Card className="flex flex-col border-accent bg-surface ring-1 ring-accent/40">
+            <CardContent className="flex h-full flex-col gap-4 p-5">
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent">
+                  <MarkHotspot className="h-6 w-6" />
+                </span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-semibold text-ink">热点线</h3>
+                    <span className="rounded-full border border-accent/50 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+                      主用
+                    </span>
+                  </div>
+                  <p className="text-xs text-ink-2">热点 → 公众号</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-2">
+                <LinkButton href="/hotspot" variant="outline" className="justify-start">
+                  搜索热点
+                </LinkButton>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                <span className="text-ink-2">本次热点选题状态</span>
+                {latest && (
+                  <span className="text-ink-2">
+                    最新：
+                    <span className="font-medium text-ink">
+                      第{latest.issue}期 · {statusLabel(latest)}
+                    </span>
+                  </span>
+                )}
+              </div>
+
+              <LinkButton href="/hotspot" className="mt-auto w-full">
+                去搜热点
+                <ArrowRight className="h-4 w-4" />
+              </LinkButton>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* 两线归一：生产→审核→封面→发布 → 公众号草稿箱 */}
+      <p className="mt-4 text-center text-xs text-ink-2">
+        两条线共用「生产 → 审核 → 封面 → 发布」，最终进
         <LinkButton href="/tasks" variant="link" size="sm" className="px-1">
           出稿与审核
         </LinkButton>
-        完成确认与发布。
       </p>
 
-      {/* 历史产出：首页仅留一条细链接，避免首屏堆叠 */}
+      {/* 历史产出：仅留一条细链接 */}
       <div className="mt-6 flex justify-end">
         <LinkButton href="/tasks" variant="ghost" size="sm">
           查看全部历史

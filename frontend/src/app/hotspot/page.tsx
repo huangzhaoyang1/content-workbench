@@ -29,8 +29,18 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
+import { Steps } from "@/components/ui/steps";
 
 const TIME_RANGES = ["近1天", "近7天", "近30天"];
+
+/** 热点线流程：搜索 → 勾选 → 生成选题 → 确认 → 生产 */
+const HOTSPOT_FLOW = [
+  { key: "search", label: "搜索热点" },
+  { key: "pick", label: "勾选素材" },
+  { key: "topic", label: "生成选题" },
+  { key: "confirm", label: "确认" },
+  { key: "produce", label: "生产" },
+];
 
 export default function HotspotPage() {
   const { toast } = useToast();
@@ -180,6 +190,17 @@ export default function HotspotPage() {
           </div>
         }
       />
+
+      {/* 热点线流程指示 */}
+      <Card className="mt-5">
+        <CardContent className="p-4">
+          <Steps
+            steps={HOTSPOT_FLOW}
+            current={selected.length > 0 ? 1 : 0}
+            running={loading}
+          />
+        </CardContent>
+      </Card>
 
       {quota?.exhausted && (
         <Alert variant="warning" className="mt-4">

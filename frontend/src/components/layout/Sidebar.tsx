@@ -2,68 +2,73 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import {
-  LayoutDashboard,
-  Settings,
-  Flame,
-  Lightbulb,
-  BarChart3,
-  ListChecks,
-  Target,
-  Bookmark,
-  FileText,
-  ChevronDown,
-  Menu,
-  X,
-  type LucideIcon,
-} from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { Settings, Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  MarkWorkbench,
+  MarkDouyin,
+  MarkHotspot,
+  MarkHistory,
+  MarkAnalytics,
+} from "@/components/brand/marks";
 
 interface NavItem {
   href: string;
   label: string;
-  icon: LucideIcon;
+  icon: React.ComponentType<{ className?: string }>;
   desc: string;
   /** 自定义高亮判定；不传则默认「/ 精确匹配，其余前缀匹配」。 */
-  activeWhen?: (pathname: string, review: boolean) => boolean;
+  activeWhen?: (pathname: string) => boolean;
 }
 
-// 独立一级：工作台（仅此项，置顶）
-const WORKBENCH: NavItem = {
-  href: "/",
-  label: "工作台",
-  icon: LayoutDashboard,
-  desc: "流程总入口",
-};
-
-// 核心流程（图标 + 大字号）
-const CORE: NavItem[] = [
-  { href: "/dissect", label: "拆解", icon: Target, desc: "抖音爆款 → 公众号" },
-  { href: "/topic", label: "选题", icon: Lightbulb, desc: "生成选题 · 跑流水线" },
+const NAV: NavItem[] = [
+  {
+    href: "/",
+    label: "工作台",
+    icon: MarkWorkbench,
+    desc: "流程总入口",
+    activeWhen: (p) => p === "/",
+  },
+  {
+    href: "/douyin-sync",
+    label: "抖音线",
+    icon: MarkDouyin,
+    desc: "即时拆解 · 收藏沉淀",
+    activeWhen: (p) => p === "/douyin-sync" || p.startsWith("/douyin-sync") || p === "/dissect",
+  },
+  {
+    href: "/hotspot",
+    label: "热点线",
+    icon: MarkHotspot,
+    desc: "搜索热点 · 生成选题",
+    activeWhen: (p) => p === "/hotspot" || p.startsWith("/hotspot") || p === "/topic",
+  },
   {
     href: "/tasks",
-    label: "出稿与审核",
-    icon: FileText,
-    desc: "发起生产 · 待审核",
-    // /tasks 同时承载出稿与审核（?review=1 为审核模式），两种状态都高亮
-    activeWhen: (p) => p === "/tasks",
+    label: "历史任务",
+    icon: MarkHistory,
+    desc: "出稿与审核 · 往期",
+    activeWhen: (p) => p === "/tasks" || p.startsWith("/tasks"),
+  },
+  {
+    href: "/analytics",
+    label: "数据分析",
+    icon: MarkAnalytics,
+    desc: "复盘找方向",
+    activeWhen: (p) => p === "/analytics" || p.startsWith("/analytics"),
+  },
+  {
+    href: "/config",
+    label: "设置",
+    icon: Settings,
+    desc: "密钥与参数",
+    activeWhen: (p) => p === "/config" || p.startsWith("/config"),
   },
 ];
 
-// 更多（折叠组，默认收起）
-const MORE: NavItem[] = [
-  { href: "/hotspot", label: "热点", icon: Flame, desc: "搜索与洞察" },
-  { href: "/queue", label: "队列", icon: ListChecks, desc: "批量排期" },
-  { href: "/analytics", label: "数据分析", icon: BarChart3, desc: "复盘找方向" },
-  { href: "/douyin-sync", label: "抖音同步", icon: Bookmark, desc: "收藏夹同步" },
-  { href: "/config", label: "设置", icon: Settings, desc: "密钥与参数" },
-];
-
-const ALL = [WORKBENCH, ...CORE, ...MORE];
-
-function isActive(item: NavItem, pathname: string, review: boolean): boolean {
-  if (item.activeWhen) return item.activeWhen(pathname, review);
+function isActive(item: NavItem, pathname: string): boolean {
+  if (item.activeWhen) return item.activeWhen(pathname);
   return item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
 }
 
@@ -71,12 +76,10 @@ function NavLink({
   item,
   active,
   onNavigate,
-  size = "sm",
 }: {
   item: NavItem;
   active: boolean;
   onNavigate?: () => void;
-  size?: "core" | "sm";
 }) {
   const Icon = item.icon;
   return (
@@ -85,88 +88,35 @@ function NavLink({
       onClick={onNavigate}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "group flex items-center gap-3 rounded-lg transition-all duration-150",
-        size === "core"
-          ? "px-3 py-2.5 text-[15px]"
-          : "px-3 py-2 text-sm",
+        "group flex items-center gap-3 rounded-lg border-l-2 px-3 py-2.5 text-[15px] transition-all duration-150",
         active
-          ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-          : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
+          ? "border-accent bg-accent/10 font-medium text-ink"
+          : "border-transparent text-ink-2 hover:bg-sidebar-accent/60 hover:text-ink"
       )}
     >
       <Icon
         className={cn(
-          size === "core" ? "h-5 w-5" : "h-4 w-4",
-          "shrink-0 transition-transform duration-150",
-          !active && "group-hover:scale-110"
+          "h-5 w-5 shrink-0 transition-transform duration-150",
+          active ? "text-accent" : "text-ink-3 group-hover:scale-110 group-hover:text-ink-2"
         )}
       />
       <span className="flex min-w-0 flex-col">
         <span className="truncate leading-tight">{item.label}</span>
-        <span
-          className={cn(
-            "truncate text-[11px] text-muted-foreground/70",
-            size === "core" ? "block" : "hidden lg:block"
-          )}
-        >
-          {item.desc}
-        </span>
+        <span className="truncate text-[11px] text-ink-3">{item.desc}</span>
       </span>
     </Link>
-  );
-}
-
-function MoreGroup({
-  pathname,
-  review,
-  onNavigate,
-}: {
-  pathname: string;
-  review: boolean;
-  onNavigate?: () => void;
-}) {
-  const [open, setOpen] = React.useState(false);
-  return (
-    <div className="px-3">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground/70 transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-      >
-        <span>更多</span>
-        <ChevronDown
-          className={cn(
-            "ml-auto h-3.5 w-3.5 transition-transform duration-200",
-            open && "rotate-180"
-          )}
-        />
-      </button>
-      {open && (
-        <div className="mt-1 space-y-1">
-          {MORE.map((item) => (
-            <NavLink
-              key={item.href}
-              item={item}
-              active={isActive(item, pathname, review)}
-              onNavigate={onNavigate}
-            />
-          ))}
-        </div>
-      )}
-    </div>
   );
 }
 
 function Brand() {
   return (
     <div className="flex items-center gap-2 px-5 py-5">
-      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-        <Flame className="h-5 w-5" />
+      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+        <MarkWorkbench className="h-5 w-5" />
       </div>
       <div className="leading-tight">
-        <div className="text-sm font-semibold">AI 内容运营</div>
-        <div className="text-xs text-muted-foreground">工作台</div>
+        <div className="text-sm font-semibold text-ink">AI 内容运营</div>
+        <div className="text-xs text-ink-2">工作台</div>
       </div>
     </div>
   );
@@ -175,42 +125,24 @@ function Brand() {
 function SidebarBody({
   pathname,
   onNavigate,
-  review,
 }: {
   pathname: string;
   onNavigate?: () => void;
-  review: boolean;
 }) {
   return (
     <div className="flex h-full flex-col">
       <Brand />
-      {/* 工作台：独立一级，置顶 */}
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 pt-1">
-        <NavLink
-          item={WORKBENCH}
-          active={isActive(WORKBENCH, pathname, review)}
-          onNavigate={onNavigate}
-          size="core"
-        />
-        <div className="my-2 border-t border-sidebar-border/60" />
-        {/* 核心流程：图标 + 大字号 */}
-        <div className="px-3 pb-1 pt-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/50">
-          核心流程
-        </div>
-        {CORE.map((item) => (
+        {NAV.map((item) => (
           <NavLink
             key={item.href}
             item={item}
-            active={isActive(item, pathname, review)}
+            active={isActive(item, pathname)}
             onNavigate={onNavigate}
-            size="core"
           />
         ))}
-        <div className="pt-2">
-          <MoreGroup pathname={pathname} review={review} onNavigate={onNavigate} />
-        </div>
       </nav>
-      <div className="border-t border-sidebar-border px-5 py-3 text-[11px] leading-relaxed text-muted-foreground">
+      <div className="border-t border-subtle px-5 py-3 text-[11px] leading-relaxed text-ink-2">
         抖音爆款或热点，都能变成你的公众号文章
       </div>
     </div>
@@ -219,21 +151,29 @@ function SidebarBody({
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [open, setOpen] = React.useState(false);
-  // 用挂载后读取 location 的方式判断 ?review=1，避免 useSearchParams 的 Suspense 要求。
-  const [review, setReview] = React.useState(false);
+  const restored = React.useRef(false);
 
+  // 记住上次访问的页面：写入
   React.useEffect(() => {
-    const q = new URLSearchParams(window.location.search).get("review");
-    setReview(q === "1");
+    if (pathname) localStorage.setItem("cw:last-path", pathname);
   }, [pathname]);
 
-  // 路由变化时自动收起抽屉
+  // 记住上次访问的页面：从「/」进入时自动回到上次页面
+  React.useEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    const last = localStorage.getItem("cw:last-path");
+    if (last && last !== "/" && pathname === "/") {
+      router.replace(last);
+    }
+  }, [pathname, router]);
+
   React.useEffect(() => {
     setOpen(false);
   }, [pathname]);
 
-  // 抽屉打开时锁定滚动 + Esc 关闭
   React.useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -248,17 +188,15 @@ export function Sidebar() {
     };
   }, [open]);
 
-  const current = ALL.find((n) => isActive(n, pathname, review));
+  const current = NAV.find((n) => isActive(n, pathname));
 
   return (
     <>
-      {/* 桌面端：常驻侧栏 */}
-      <aside className="hidden h-screen w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex">
-        <SidebarBody pathname={pathname} review={review} />
+      <aside className="hidden h-screen w-60 shrink-0 flex-col border-r border-subtle bg-sidebar text-sidebar-foreground lg:flex">
+        <SidebarBody pathname={pathname} />
       </aside>
 
-      {/* 移动端：顶部条 */}
-      <header className="fixed inset-x-0 top-0 z-40 flex h-14 items-center gap-3 border-b border-sidebar-border bg-sidebar px-4 text-sidebar-foreground lg:hidden">
+      <header className="fixed inset-x-0 top-0 z-40 flex h-14 items-center gap-3 border-b border-subtle bg-sidebar px-4 text-sidebar-foreground lg:hidden">
         <button
           type="button"
           aria-label="打开菜单"
@@ -268,23 +206,20 @@ export function Sidebar() {
           <Menu className="h-5 w-5" />
         </button>
         <div className="flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
-            <Flame className="h-4 w-4" />
+          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
+            <MarkWorkbench className="h-4 w-4" />
           </div>
-          <span className="text-sm font-semibold">
-            {current?.label ?? "AI 内容运营"}
-          </span>
+          <span className="text-sm font-semibold">{current?.label ?? "AI 内容运营"}</span>
         </div>
       </header>
 
-      {/* 移动端：抽屉 */}
       {open && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div
-            className="absolute inset-0 animate-overlay-in bg-black/60 backdrop-blur-sm"
+            className="absolute inset-0 animate-overlay-in bg-base/70 backdrop-blur-sm"
             onClick={() => setOpen(false)}
           />
-          <aside className="absolute left-0 top-0 flex h-full w-64 animate-slide-in-left flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground shadow-2xl">
+          <aside className="absolute left-0 top-0 flex h-full w-64 animate-slide-in-left flex-col border-r border-subtle bg-sidebar text-sidebar-foreground shadow-2xl">
             <div className="flex items-center justify-between pr-3">
               <Brand />
               <button
@@ -297,11 +232,7 @@ export function Sidebar() {
               </button>
             </div>
             <div className="min-h-0 flex-1">
-              <SidebarBody
-                pathname={pathname}
-                review={review}
-                onNavigate={() => setOpen(false)}
-              />
+              <SidebarBody pathname={pathname} onNavigate={() => setOpen(false)} />
             </div>
           </aside>
         </div>
