@@ -377,12 +377,15 @@ async def _run(task_id: str, cmd: list[str]) -> None:
         task["error"] = str(e)
         task["logs"].append(f"[error] {e}")
     task["finished_at"] = _now()
-    # 审核流：review 任务产出成功后，本地打分并写入 result.json（决策支持，不自动拦截）
-    if task.get("status") == "success" and task.get("review"):
+    # 审核流：任何「产出成功」的任务（含非 review 的推送失败但文章+封面已生成场景）
+    # 都本地打分并写入 result.json 的 quality 字段（决策支持，不自动拦截）。
+    # 推送失败但文章/封面已生成时，run_pipeline 已把整期置为 PENDING_REVIEW + exit 0，
+    # 这里据此把质量分补上，让前端质量卡正常出现、三步审核弹窗可打开。
+    if task.get("status") == "success":
         try:
             _attach_quality(task["issue"])
         except Exception as e:  # noqa: BLE001
-            print(f"[pipeline] 审核质量打分跳过（issue={task['issue']}）：{e}", file=sys.stderr)
+            print(f"[pipeline] 质量打分跳过（issue={task['issue']}）：{e}", file=sys.stderr)
     _persist()
 
 
