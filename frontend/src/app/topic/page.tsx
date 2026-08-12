@@ -589,7 +589,7 @@ export default function TopicPage() {
     if (status === "running")
       return (
         <Badge variant="warning">
-          <Clock className="mr-1 h-3 w-3" /> 进行中
+          <Clock className="mr-1 h-3 w-3" /> 运行中
         </Badge>
       );
     if (status === "success")
