@@ -61,6 +61,7 @@ export interface WorkbenchConfig {
   vision: VisionConfig;
   ocr: OcrConfig;
   daily_limit: number;
+  custom_forbidden_words: string[];
 }
 
 export interface HotspotItem {

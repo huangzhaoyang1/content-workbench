@@ -1,0 +1,10 @@
+{
+  "id": 4,
+  "category": "dissect",
+  "question": "拆一条讲『AI 写文案』的视频，给出适合公众号改写的 3 个角度。",
+  "status": "error",
+  "elapsed_sec": 0.002,
+  "service": null,
+  "reason": "DissectError: 爆款拆解需要 DeepSeek 密钥。请到「系统配置 → DeepSeek」填写 API Key 后重试。",
+  "trace": "Traceback (most recent call last):\n  File \"C:\\Users\\黄朝扬\\WorkBuddy\\content-workbench\\backend\\eval\\eval_run.py\", line 87, in run_dissect\n    out = s_dissect.analyze(text=str(sample))\n  File \"C:\\Users\\黄朝扬\\WorkBuddy\\content-workbench\\backend\\services\\content\\dissect.py\", line 1014, in analyze\n    raise DissectError(\n        \"爆款拆解需要 DeepSeek 密钥。请到「系统配置 → DeepSeek」填写 API Key 后重试。\"\n    )\nbackend.services.content.dissect.DissectError: 爆款拆解需要 DeepSeek 密钥。请到「系统配置 → DeepSeek」填写 API Key 后重试。\n"
+}

@@ -1,0 +1,61 @@
+{
+  "generated_at": "2026-08-12T07:46:09",
+  "total_questions": 20,
+  "attempted": 15,
+  "skipped": 0,
+  "errored": 5,
+  "passed": 5,
+  "failed": 10,
+  "overall_accuracy": 0.3333,
+  "per_category_accuracy": {
+    "topic": 0.8,
+    "hotspot": 0.2,
+    "retrieval_history": 0.0
+  },
+  "per_category_counts": {
+    "topic": {
+      "passed": 4,
+      "attempted": 5
+    },
+    "hotspot": {
+      "passed": 1,
+      "attempted": 5
+    },
+    "retrieval_history": {
+      "passed": 0,
+      "attempted": 5
+    }
+  },
+  "weakest_category": {
+    "category": "retrieval_history",
+    "accuracy": 0.0
+  },
+  "skipped_questions": [],
+  "errored_questions": [
+    {
+      "id": 1,
+      "category": "dissect",
+      "reason": "DissectError: 爆款拆解需要 DeepSeek 密钥。请到「系统配置 → DeepSeek」填写 API Key 后重试。"
+    },
+    {
+      "id": 2,
+      "category": "dissect",
+      "reason": "DissectError: 爆款拆解需要 DeepSeek 密钥。请到「系统配置 → DeepSeek」填写 API Key 后重试。"
+    },
+    {
+      "id": 3,
+      "category": "dissect",
+      "reason": "DissectError: 爆款拆解需要 DeepSeek 密钥。请到「系统配置 → DeepSeek」填写 API Key 后重试。"
+    },
+    {
+      "id": 4,
+      "category": "dissect",
+      "reason": "DissectError: 爆款拆解需要 DeepSeek 密钥。请到「系统配置 → DeepSeek」填写 API Key 后重试。"
+    },
+    {
+      "id": 5,
+      "category": "dissect",
+      "reason": "DissectError: 爆款拆解需要 DeepSeek 密钥。请到「系统配置 → DeepSeek」填写 API Key 后重试。"
+    }
+  ]
+}

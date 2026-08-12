@@ -20,48 +20,13 @@ from typing import Any
 # ---------------------------------------------------------------------------
 # 一、写进 prompt 的四阶标准
 # ---------------------------------------------------------------------------
-QUALITY_SPEC = """【内容质量四阶标准 —— 四阶全部达标才算合格，缺一阶就是废稿】
+from ..prompts import load_quality_styles
+from ..system.config import load_config
 
-▍第一阶 · 格式达标（决定读者愿不愿意往下滑）
-1. 小标题用 `## emoji 小标题` 形式，全文 3-5 个，emoji 不重复。
-2. 关键结论、反常识的点、要读者记住的话，用 `<font color="red">**红色加粗**</font>`
-   包起来，全文 4-8 处；每屏最多一处，滥用就不值钱了。
-3. 金句用 Markdown 引用块 `> ` 单独成段，全文 2-3 处。
-4. 段落必须短：每段最多 3 行手机屏（60-80 字），长句一律拆成短句。
-5. 能列表就列表：步骤用有序列表，并列要点用 `- `。
+_QUALITY = load_quality_styles()
+QUALITY_SPEC = _QUALITY["QUALITY_SPEC"]
+QUALITY_SELF_CHECK = _QUALITY["QUALITY_SELF_CHECK"]
 
-▍第二阶 · 内容有料（决定读者读完有没有「学到了」）★★★ 最重要，优先满足这一阶
-1. 全文至少 3 个「具体细节 / 真实数据 / 可复用方法」，三类都要出现：
-   · 具体细节 —— 写「我在第 3 步卡了 40 分钟」，不写「过程有点曲折」；
-   · 真实数据 —— 写「从 800 字压到 320 字，阅读完成率翻倍」，不写「效果提升明显」；
-   · 可复用方法 —— 读者能照着抄的步骤、话术、参数、判断清单。
-2. 至少 1 个反常识观点，并且给出成立的理由，不能只抛结论。
-3. 每一个结论后面必须跟一个场景、一个数字或一个动作，三选一，不许裸奔。
-4. 以下表达出现即判定不合格，一句都不许写：
-   「随着 AI 的发展」「在这个时代」「内容为王」「贵在坚持」
-   「适合自己的才是最好的」「总之」「综上所述」「不断学习不断进步」
-   以及任何没有主语、没有数字、换个话题也成立的万能句。
-5. 自检方法：删掉这句话，文章信息量是否减少？不减少就删掉它。
-
-▍第三阶 · 情绪共鸣（决定读者会不会记住你这个人）
-1. 开头用一个具体场景或一次真实失败切入，禁止总起句、禁止背景铺垫。
-2. 全文要有情绪曲线：困惑 → 折腾 → 转折 → 松口气，不要从头到尾一个调。
-3. 人设保持一致：非技术出身、正在试错、承认不确定，不装专家。
-4. 结尾一个开放式提问，问的是读者当下的真实处境，不是「你学会了吗」。
-
-▍第四阶 · 传播属性（决定读者愿不愿意转发）
-1. 至少 2 句能被单独截图发朋友圈的金句：短、有反差、脱离上下文也成立。
-2. 至少 1 处清单体表达，例如「3 个信号」「5 步」「两类人」。
-3. 至少 1 处身份认同表述，例如「如果你也是……那这篇就是写给你的」。
-"""
-
-# 改写/写作 prompt 里统一附加的自检收尾
-QUALITY_SELF_CHECK = """【交稿前自检（不通过就重写，不要交半成品）】
-- 数一遍：具体数字/时间/金额出现了几处？少于 5 处就回去补。
-- 数一遍：红色加粗几处？引用块几处？emoji 小标题几个？不在区间内就调整。
-- 通读一遍：有没有一句话删掉之后信息量不变？有就删掉。
-- 问自己：读者读完能立刻做的那一件事是什么？说不出来就说明第二阶没达标。
-"""
 
 # ---------------------------------------------------------------------------
 # 二、自动打分
@@ -112,6 +77,71 @@ _CONCRETE = (
 _EMOTION = ("我", "其实", "说实话", "坦白讲", "有点", "崩溃", "松了口气", "尴尬", "焦虑", "爽")
 
 _IDENTITY = ("如果你也", "如果你正在", "写给", "同类", "跟我一样", "你是不是也")
+
+
+# ---------------------------------------------------------------------------
+# 三、违禁词合规扫描（命中任意词即标记 BLOCK）
+# ---------------------------------------------------------------------------
+# 广告法极限词：约 30 条，违反《广告法》绝对化用语，平台会限流/下架。
+_FORBIDDEN_AD_LAW = [
+    "最", "最佳", "最大", "最好", "最高", "最低", "顶级", "极品", "极致",
+    "第一", "唯一", "独家", "首发", "首选", "绝无仅有", "史无前例", "空前绝后",
+    "独一无二", "万能", "百分百", "100%", "国家级", "世界级", "全国首家",
+    "销量第一", "排名第一", "王牌", "领导者", "领先品牌", "永久",
+]
+
+# 平台敏感词：约 20 条占位，抖音/公众号导流、诱导类表达（可按平台调整）。
+_FORBIDDEN_PLATFORM = [
+    "微信", "加微信", "微信号", "私聊", "私信我", "免费领", "扫码", "二维码",
+    "红包", "转发朋友圈", "点赞关注", "关注公众号", "点击链接", "下载APP",
+    "限时免费", "内部资料", "机密", "加群", "福利", "秒杀",
+]
+
+# (固定两类) + 用户自定义类（从配置读）。分类顺序即命中返回顺序。
+_FORBIDDEN_CATEGORIES = (
+    ("广告法极限词", _FORBIDDEN_AD_LAW),
+    ("平台敏感词", _FORBIDDEN_PLATFORM),
+)
+
+
+def _load_custom_forbidden_words() -> list[str]:
+    """从 data/workbench_config.json 读 custom_forbidden_words（默认空）。"""
+    try:
+        cfg = load_config()
+        raw = cfg.get("custom_forbidden_words") or []
+    except Exception:
+        raw = []
+    out: list[str] = []
+    seen: set[str] = set()
+    for w in raw:
+        if not isinstance(w, str):
+            continue
+        w = w.strip()
+        if w and w not in seen:
+            seen.add(w)
+            out.append(w)
+    return out
+
+
+def _check_forbidden_words(content: str) -> list[dict]:
+    """扫描内容中的违禁词，返回命中列表 [{word, category}, ...]。
+
+    命中任意词即视为合规风险，调用方据此把评分标记 BLOCK。
+    匹配方式：子串包含（与 _FLUFF 一致），大小写敏感、按原文匹配。
+    """
+    content = content or ""
+    hits: list[dict] = []
+    seen_pairs: set[tuple[str, str]] = set()
+    for category, words in _FORBIDDEN_CATEGORIES:
+        for w in words:
+            if w and w in content and (w, category) not in seen_pairs:
+                seen_pairs.add((w, category))
+                hits.append({"word": w, "category": category})
+    for w in _load_custom_forbidden_words():
+        if w and w in content and (w, "用户自定义词") not in seen_pairs:
+            seen_pairs.add((w, "用户自定义词"))
+            hits.append({"word": w, "category": "用户自定义词"})
+    return hits
 
 
 def _paragraphs(content: str) -> list[str]:
@@ -261,6 +291,8 @@ def _grade(total: float) -> str:
 def score_article(content: str, *, titles: Any = None) -> dict:
     """对一篇 Markdown 文章做四维打分。纯本地计算，不调模型。"""
     content = content or ""
+    forbidden = _check_forbidden_words(content)
+    blocked = bool(forbidden)
     fmt, t1 = _score_format(content)
     sub, t2 = _score_substance(content)
     emo, t3 = _score_emotion(content)
@@ -279,10 +311,16 @@ def score_article(content: str, *, titles: Any = None) -> dict:
     for name, _score, tips in buckets:
         for tip in tips:
             advice.append(f"[{name}] {tip}")
+    if blocked:
+        words_desc = "、".join(h["word"] for h in forbidden[:6])
+        more = f" 等共 {len(forbidden)} 处" if len(forbidden) > 6 else ""
+        advice.insert(0, f"[合规] 命中违禁词：{words_desc}{more}，已标记 BLOCK，请修改后重新生成")
 
     return {
         "total": total,
-        "grade": _grade(total),
+        "grade": "BLOCK" if blocked else _grade(total),
+        "block": blocked,
+        "forbidden_words": forbidden,
         "dimensions": [
             {"key": "format", "label": "格式达标", "score": fmt, "full": 25},
             {"key": "substance", "label": "内容有料", "score": sub, "full": 25},

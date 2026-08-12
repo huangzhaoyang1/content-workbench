@@ -1,0 +1,19 @@
+{
+  "id": 16,
+  "category": "retrieval_history",
+  "question": "检索我过去一个月写过的所有『AI 工具』类公众号文章。",
+  "status": "ran",
+  "elapsed_sec": 0.432,
+  "service": "retrieval.search",
+  "passed": false,
+  "hits": [],
+  "missed": [
+    "历史",
+    "AI工具",
+    "文章",
+    "检索",
+    "月份"
+  ],
+  "output_excerpt": "[]",
+  "query": "检索我过去一个月写过的所有『AI 工具』类公众号文章。"
+}

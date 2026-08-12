@@ -10,7 +10,14 @@ from __future__ import annotations
 
 import json as _json
 
+from ..system.llm_usage import call as llm_call
+
 TIME_RANGES = {"近1天": 24, "近7天": 24 * 7, "近30天": 24 * 30}
+
+# data_source 取值：用于热点洞察提示词模板的 {data_source} 占位符。
+# 真实用 SerpAPI / 自定义接口数据时为「真实搜索」；回退到内置示例数据时为「模拟数据...」。
+DATA_SOURCE_REAL = "真实搜索"
+DATA_SOURCE_MOCK = "模拟数据（未配置真实搜索源）"
 
 HOTSPOT_MOCK: list[dict] = [
     {"id": "h01", "hours_ago": 3, "source": "机器之心", "url": "https://www.jiqizhixin.com/articles/hot-01",
@@ -244,29 +251,31 @@ def _search_serpapi(api_key: str, keywords: list[str], max_hours: int, daily_lim
     return filtered if filtered else out
 
 
-def _deepseek_enrich(ds: dict, rows: list[dict], keywords: list[str]) -> tuple[list[dict], str]:
-    """用 DeepSeek 对搜索结果做智能分析。返回 (列表[含 ai_summary], 整体洞察)。"""
+def _deepseek_enrich(ds: dict, rows: list[dict], data_source: str = DATA_SOURCE_REAL) -> tuple[list[dict], str]:
+    """用 DeepSeek 对搜索结果做智能分析。返回 (列表[含 ai_summary], 整体洞察)。
+
+    data_source: DATA_SOURCE_REAL / DATA_SOURCE_MOCK，注入提示词模板，
+    让模型区分真实热点与占位演示数据（mock 模式下只返回演示提示，不编造分析）。
+    """
     if not ds.get("api_key"):
         return rows, ""
-    import requests  # 懒加载
     top = rows[:15]
     titles = "\n".join(f"{i+1}. {r['title']}" for i, r in enumerate(top))
-    kw_text = "、".join(keywords) if keywords else "AI"
-    prompt = (
-        f"你是一名中文内容运营助手。以下是关于「{kw_text}」的近期热点素材标题:\n{titles}\n\n"
-        "请输出严格 JSON:{\"insight\":\"2-3 句话整体热点洞察(适合公众号选题的方向建议)\","
-        "\"angles\":[\"给第1条的切入角度\",\"给第2条的切入角度\",...最多15条]}"
-    )
-    url = (ds.get("base_url") or "https://api.deepseek.com/v1").rstrip("/") + "/chat/completions"
+    from ..prompts import load_hotspot
+    # 用 .replace 渲染：模板里 JSON 示例含字面 { }，.format 会把它误当占位符而报错。
+    prompt = load_hotspot().replace("{titles}", titles).replace("{data_source}", data_source)
+
     try:
-        r = requests.post(url,
-                          headers={"Authorization": f"Bearer {ds['api_key']}",
-                                   "Content-Type": "application/json"},
-                          json={"model": ds.get("model", "deepseek-chat"),
-                                "messages": [{"role": "user", "content": prompt}],
-                                "response_format": {"type": "json_object"},
-                                "max_tokens": 700},
-                          timeout=30)
+        r = llm_call(
+            base_url=ds.get("base_url") or "https://api.deepseek.com/v1",
+            api_key=ds["api_key"],
+            module="hotspot",
+            payload={"model": ds.get("model", "deepseek-chat"),
+                     "messages": [{"role": "user", "content": prompt}],
+                     "response_format": {"type": "json_object"},
+                     "max_tokens": 700},
+            timeout=30,
+        )
         r.raise_for_status()
         content = r.json()["choices"][0]["message"]["content"]
     except Exception:
@@ -303,7 +312,7 @@ def search(cfg: dict, keyword_text: str, time_label: str, limit: int = 15) -> di
             try:
                 rows = _search_serpapi(sa["api_key"], keywords, max_hours, daily_limit)
                 quota_inc(1)  # 每次真实搜索计 1 次，对应 1 次 SerpAPI 调用
-                rows, insight = _deepseek_enrich(ds, rows, keywords)
+                rows, insight = _deepseek_enrich(ds, rows, data_source=DATA_SOURCE_REAL)
                 rows = rows[:limit]
                 return {"items": rows, "origin": f"SerpAPI 实时搜索 · 命中 {len(rows)} 条", "insight": insight}
             except Exception as e:
@@ -317,13 +326,15 @@ def search(cfg: dict, keyword_text: str, time_label: str, limit: int = 15) -> di
     if sa.get("type") == "custom" and api.get("api_url"):
         try:
             rows = _search_api(api, keywords, time_label, max_hours)
-            rows, insight = _deepseek_enrich(ds, rows, keywords)
+            rows, insight = _deepseek_enrich(ds, rows, data_source=DATA_SOURCE_REAL)
             rows = rows[:limit]
             return {"items": rows, "origin": f"真实接口 · {api['api_url']}", "insight": insight}
         except Exception as e:
             rows = _search_mock(keywords, max_hours)[:limit]
             return {"items": rows, "origin": f"接口调用失败已回退示例数据({type(e).__name__})", "insight": ""}
 
-    # 3) 内置 mock 示例数据
+    # 3) 内置 mock 示例数据（演示模式：把 data_source 标为模拟，让模型只回演示提示不编造）
     rows = _search_mock(keywords, max_hours)[:limit]
-    return {"items": rows, "origin": "示例数据(mock)", "insight": ""}
+    rows, insight = _deepseek_enrich(ds, rows, data_source=DATA_SOURCE_MOCK)
+    rows = rows[:limit]
+    return {"items": rows, "origin": "示例数据(mock)", "insight": insight}

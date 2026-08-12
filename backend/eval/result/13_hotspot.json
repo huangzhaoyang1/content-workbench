@@ -1,0 +1,19 @@
+{
+  "id": 13,
+  "category": "hotspot",
+  "question": "本周『AI 绘画』赛道有什么新热点，判断是否值得写公众号文章。",
+  "status": "ran",
+  "elapsed_sec": 0.0,
+  "service": "hotspot.search",
+  "passed": false,
+  "hits": [],
+  "missed": [
+    "AI绘画",
+    "热点",
+    "值得",
+    "公众号",
+    "判断"
+  ],
+  "output_excerpt": "{\n  \"items\": [],\n  \"origin\": \"示例数据(mock)\",\n  \"insight\": \"\"\n}",
+  "keyword": "AI 绘画"
+}

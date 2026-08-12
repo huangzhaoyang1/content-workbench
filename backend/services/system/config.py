@@ -39,7 +39,7 @@ DEFAULT_CONFIG = {
     "python_path": "python",                      # Python 解释器（运行流水线脚本用）
     "account_name": "扬的AI学习日记",              # 公众号名称
     "positioning": "",                            # 内容定位
-    "style": "",                                  # 文风要求
+    "style": "",                                  # 文风要求（空 = 由 dissect 侧用默认文风兜底）
     "visual_style": "",                           # 视觉风格
     "hotspot_api": {"api_url": "", "api_key": "", "timeout": 10, "method": "GET"},
     "scheduled_tasks": [],                        # 定时任务列表
@@ -51,6 +51,16 @@ DEFAULT_CONFIG = {
     # 但 DeepSeek 官方 API 没有视觉模型，真要用截图识别就得在这里单独指一个 VL 端点，
     # 例如 https://api.siliconflow.cn/v1 + deepseek-ai/deepseek-vl2。
     "vision": {"base_url": "", "api_key": "", "model": "deepseek-vl2"},
+    # LLM 调用成本估算单价（元 / 每百万 token）。
+    # 仅供 llm_usage.cost_est 做量级估算（非精确账单）：
+    #   cost_est = (prompt_tokens*input + completion_tokens*output) / 1_000_000
+    # 缓存命中/未命中等复杂计费在此合并为单一定价；改这里即可调整估算口径，不影响实际扣费。
+    "llm_pricing": {
+        "default": {"input": 1.0, "output": 4.0},            # 兜底价（未知模型按此估）
+        "deepseek-chat": {"input": 1.0, "output": 4.0},
+        "deepseek-reasoner": {"input": 4.0, "output": 16.0},
+        "deepseek-vl2": {"input": 1.0, "output": 4.0},       # 硅基流动等托管的 VL2 估算价
+    },
     # 截图识别（OCR）策略：默认本地 PaddleOCR，零配置可用。
     # mode 可选 paddle_ocr / tesseract / baidu_ocr / vision_model：
     # - paddle_ocr ：本地 PaddleOCR（依赖 paddlepaddle，高版本 Python 可能装不上）
@@ -69,6 +79,7 @@ DEFAULT_CONFIG = {
     },
     "wechat": {"appid": "", "secret": ""},        # 公众号凭据（推草稿箱用）
     "daily_limit": 50,                            # 每日搜索上限（防止超额扣费）
+    "custom_forbidden_words": [],                 # 用户自定义违禁词（quality.py 合规扫描用）
 }
 
 # 密钥字段 → 环境变量名。环境变量优先级高于配置文件，且永远不落盘。
@@ -138,6 +149,7 @@ def load_config() -> dict:
     cfg["search_api"] = {**DEFAULT_CONFIG["search_api"], **(cfg.get("search_api") or {})}
     cfg["deepseek"] = {**DEFAULT_CONFIG["deepseek"], **(cfg.get("deepseek") or {})}
     cfg["vision"] = {**DEFAULT_CONFIG["vision"], **(cfg.get("vision") or {})}
+    cfg["llm_pricing"] = {**DEFAULT_CONFIG["llm_pricing"], **(cfg.get("llm_pricing") or {})}
     cfg["ocr"] = {**DEFAULT_CONFIG["ocr"], **(cfg.get("ocr") or {})}
     cfg["wechat"] = {**DEFAULT_CONFIG["wechat"], **(cfg.get("wechat") or {})}
     _overlay_env(cfg)
@@ -257,6 +269,7 @@ def save_config(cfg: dict) -> dict:
     out["search_api"] = cfg.get("search_api") or DEFAULT_CONFIG["search_api"]
     out["deepseek"] = cfg.get("deepseek") or DEFAULT_CONFIG["deepseek"]
     out["vision"] = {**DEFAULT_CONFIG["vision"], **(cfg.get("vision") or {})}
+    out["llm_pricing"] = {**DEFAULT_CONFIG["llm_pricing"], **(cfg.get("llm_pricing") or {})}
     out["ocr"] = {**DEFAULT_CONFIG["ocr"], **(cfg.get("ocr") or {})}
     out["wechat"] = cfg.get("wechat") or DEFAULT_CONFIG["wechat"]
     # 密钥字段永不落盘：无论是否配置环境变量，配置文件里这些字段都置空，

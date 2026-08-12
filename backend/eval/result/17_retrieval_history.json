@@ -1,0 +1,19 @@
+{
+  "id": 17,
+  "category": "retrieval_history",
+  "question": "调出三个月前那篇讲『Prompt 工程』的文章，回顾它的阅读数据。",
+  "status": "ran",
+  "elapsed_sec": 0.002,
+  "service": "retrieval.search",
+  "passed": false,
+  "hits": [],
+  "missed": [
+    "历史",
+    "Prompt",
+    "阅读",
+    "数据",
+    "回顾"
+  ],
+  "output_excerpt": "[]",
+  "query": "调出三个月前那篇讲『Prompt 工程』的文章，回顾它的阅读数据。"
+}

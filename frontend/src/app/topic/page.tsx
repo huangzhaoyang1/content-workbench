@@ -227,6 +227,8 @@ export default function TopicPage() {
   }>({});
   /** 是否以待审核模式生产（不推送，审核后再发布） */
   const [formReview, setFormReview] = useState(false);
+  /** 是否自动检索历史素材（选题库 / 抖音同步）补充进 references，默认开 */
+  const [formAutoRefs, setFormAutoRefs] = useState(true);
 
   // 待审核的发布/放弃
   const [publishing, setPublishing] = useState(false);
@@ -404,6 +406,7 @@ export default function TopicPage() {
         references: refs,
         platform: formPlatform,
         review: formReview,
+        autoRefs: formAutoRefs,
       });
       setTask({
         task_id: res.task_id,
@@ -952,6 +955,19 @@ export default function TopicPage() {
                 先存为
                 <span className="font-medium text-amber-500">待审核</span>
                 （不推送，审核后再发布）
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-sky-500"
+                checked={formAutoRefs}
+                onChange={(e) => setFormAutoRefs(e.target.checked)}
+              />
+              <span>
+                自动补充
+                <span className="font-medium text-sky-400">历史素材</span>
+                （检索选题库 / 抖音同步，作为写作参考；关闭则只用当前热点素材）
               </span>
             </label>
             <div className="flex flex-col gap-2 sm:flex-row">

@@ -276,6 +276,25 @@ export default function ConfigPage() {
                   placeholder="如：简约科技风 / 暖色生活感"
                 />
               </Field>
+              <Separator />
+              <Field label="自定义违禁词（每行一个，命中即标记 BLOCK）">
+                <Textarea
+                  value={(cfg.custom_forbidden_words ?? []).join("\n")}
+                  onChange={(e) =>
+                    update({
+                      custom_forbidden_words: e.target.value
+                        .split(/[\n,，]/)
+                        .map((s) => s.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                  placeholder={"每行一个词，例如：\n加我微信\n私聊\n绝对有效"}
+                  rows={4}
+                />
+                <p className="text-xs text-muted-foreground">
+                  这些词会与「广告法极限词」「平台敏感词」一起扫描，文章命中任意词时评分标记 BLOCK。
+                </p>
+              </Field>
             </CardContent>
           </Card>
         </TabsContent>

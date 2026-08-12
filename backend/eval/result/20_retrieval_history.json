@@ -1,0 +1,19 @@
+{
+  "id": 20,
+  "category": "retrieval_history",
+  "question": "找出去年双十一期间关于『本地生活投放』的复盘记录。",
+  "status": "ran",
+  "elapsed_sec": 0.003,
+  "service": "retrieval.search",
+  "passed": false,
+  "hits": [],
+  "missed": [
+    "历史",
+    "双十一",
+    "本地生活",
+    "复盘",
+    "投放"
+  ],
+  "output_excerpt": "[]",
+  "query": "找出去年双十一期间关于『本地生活投放』的复盘记录。"
+}

@@ -1,0 +1,19 @@
+{
+  "id": 11,
+  "category": "hotspot",
+  "question": "检索最近一周关于『AI Agent』的热点素材，给适合公众号的切入角度。",
+  "status": "ran",
+  "elapsed_sec": 0.0,
+  "service": "hotspot.search",
+  "passed": false,
+  "hits": [],
+  "missed": [
+    "热点",
+    "AI Agent",
+    "切入角度",
+    "公众号",
+    "洞察"
+  ],
+  "output_excerpt": "{\n  \"items\": [],\n  \"origin\": \"示例数据(mock)\",\n  \"insight\": \"\"\n}",
+  "keyword": "AI Agent"
+}

@@ -21,6 +21,7 @@ import logging
 import re
 
 from ..system.config import load_config
+from ..system.llm_usage import call as llm_call
 
 log = logging.getLogger("workbench.vision")
 
@@ -122,54 +123,30 @@ def validate_image(filename: str, content: bytes) -> str:
 
 
 # --------------------------------------------------------------------------
-# 提示词
+# 提示词（视觉 / OCR 共用模板，按视觉模式注入参数）
 # --------------------------------------------------------------------------
-_SYSTEM_PROMPT = (
-    "你是一个严谨的数据提取助手，专门从微信公众号后台截图中提取运营数据。"
-    "你只输出 JSON，不输出任何解释、前言、Markdown 代码围栏或多余文字。"
+from ..prompts import load_ocr_shared
+
+_SHARED = load_ocr_shared()
+_SYSTEM_PROMPT = _SHARED["system"]
+# 阶段1：注入视觉专属参数。input_block 内含 {image}，留到调用时替换为空
+# （真实图片作为单独 image_url 内容块发送，不参与文本，保持原行为不变）。
+_USER_TEMPLATE = (
+    _SHARED["user"]
+    .replace("{input_desc}", "（图片）")
+    .replace("{ocr_detail}", "请直接识别图片中的内容。")
+    .replace(
+        "{mode_rule}",
+        "若为图片：图片清晰能确认所有数字填 high，部分模糊或有遮挡填 low 并说明。",
+    )
+    .replace("{input_block}", "【截图图片】\n{image}")
 )
 
-_USER_PROMPT = """请识别这张微信公众号后台截图，把里面的数据提取成 JSON。
 
-严格按以下结构输出（只输出 JSON 本身）：
-{
-  "articles": [
-    {
-      "title": "文章标题原文",
-      "date": "YYYY-MM-DD",
-      "reads": 1234,
-      "likes": 12,
-      "wow": 8,
-      "shares": 20,
-      "collects": 5
-    }
-  ],
-  "summary": {
-    "followers_delta": 0,
-    "new_followers": 0,
-    "lost_followers": 0,
-    "total_reads": 0,
-    "date_range": ""
-  },
-  "confidence": "high",
-  "note": ""
-}
+def _build_user_text() -> str:
+    """阶段2：把 {image} 占位符替换为空（图片走单独内容块，与合并前一致）。"""
+    return _USER_TEMPLATE.replace("{image}", "")
 
-字段说明与硬性要求：
-1. articles：截图里每一篇文章一条，按截图从上到下的顺序排列。
-2. title：抄写标题原文，不要改写、不要翻译、不要补全省略号以外的内容。
-3. date：发布日期，统一转成 YYYY-MM-DD。截图里只有「月-日」时，用截图中出现的年份；
-   完全没有年份就填 null，不要瞎猜。没有日期列就填 null。
-4. reads=阅读量/阅读人数，likes=在看数，wow=点赞数，shares=分享/转发数，collects=收藏数。
-5. 数字必须是纯数字（整数），不要带逗号、不要带「次」「人」等单位。
-   截图里写「1.2万」要换算成 12000。某个字段截图里没有就填 null，绝对不要编造。
-6. summary：只有整体数据/概览类截图才填，followers_delta 是净增关注（可为负数）；
-   文章列表截图里没有这些信息就全部填 null。
-7. confidence：图片清晰、能确认所有数字填 "high"；部分模糊或有遮挡填 "low"，
-   并在 note 里用中文说明哪里看不清。
-8. 如果这张图根本不是公众号后台数据截图，返回 {"articles": [], "summary": {}, "confidence": "low", "note": "不是公众号后台数据截图"}。
-
-再次强调：只输出 JSON，不要输出 ```json 围栏，不要输出任何解释。"""
 
 
 # --------------------------------------------------------------------------
@@ -209,10 +186,9 @@ def _extract_json(text: str) -> dict:
 
 
 def _call_api(cfg: dict, mime: str, content: bytes) -> str:
-    import requests  # 懒加载，和 hotspot.py 保持一致
+    import requests  # 懒加载，和 hotspot.py 保持一致（异常类型仍在此用到）
 
     b64 = base64.b64encode(content).decode("ascii")
-    url = cfg["base_url"].rstrip("/") + "/chat/completions"
     payload = {
         "model": cfg["model"],
         "messages": [
@@ -220,7 +196,7 @@ def _call_api(cfg: dict, mime: str, content: bytes) -> str:
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": _USER_PROMPT},
+                    {"type": "text", "text": _build_user_text()},
                     {
                         "type": "image_url",
                         "image_url": {"url": f"data:{mime};base64,{b64}"},
@@ -233,13 +209,11 @@ def _call_api(cfg: dict, mime: str, content: bytes) -> str:
         "stream": False,
     }
     try:
-        r = requests.post(
-            url,
-            headers={
-                "Authorization": f"Bearer {cfg['api_key']}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
+        r = llm_call(
+            base_url=cfg["base_url"],
+            api_key=cfg["api_key"],
+            module="vision",
+            payload=payload,
             timeout=_TIMEOUT,
         )
     except requests.exceptions.Timeout as e:

@@ -1,0 +1,20 @@
+{
+  "id": 15,
+  "category": "hotspot",
+  "question": "分析『AI 副业』赛道本月热点趋势，输出选题优先级建议。",
+  "status": "ran",
+  "elapsed_sec": 0.0,
+  "service": "hotspot.search",
+  "passed": true,
+  "hits": [
+    "AI 副业"
+  ],
+  "missed": [
+    "趋势",
+    "优先级",
+    "选题",
+    "热点"
+  ],
+  "output_excerpt": "{\n  \"items\": [\n    {\n      \"id\": \"h03\",\n      \"hours_ago\": 11,\n      \"source\": \"36氪\",\n      \"url\": \"https://36kr.com/p/hot-03\",\n      \"title\": \"AI 副业调研:70% 的人卡在「有工具但没交付物」\",\n      \"summary\": \"针对 2000 名 AI 副业从业者的调研显示,真正月入过万的不到 8%,绝大多数人停在学工具阶段。报告指出,能持续变现的人有个共同点:把能力固化成了可重复交付的标准流程,而不是靠灵感接单。\",\n      \"published\": \"11 小时前\"\n    }\n  ],\n  \"origin\": \"示例数据(mock)\",\n  \"insight\": \"\"\n}",
+  "keyword": "AI 副业"
+}

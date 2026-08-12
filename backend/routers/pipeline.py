@@ -14,8 +14,13 @@ class PipelineStartReq(BaseModel):
     angle: str = ""
     extra: str = ""
     references: str = ""   # 热点素材链接，英文逗号分隔
-    platform: str = "wechat"
+    platform: str = ""     # 留空 → 回退到用户偏好 default_platform
     review: bool = False   # True=存为待审核(不推送)，审核后再发布
+    style_key: str = ""    # 留空 → 回退到偏好
+    word_count: str = ""   # 留空 → 回退到偏好
+    domains: list[str] | None = None      # 留空 → 回退到偏好
+    forbidden_topics: list[str] | None = None  # 留空 → 回退到偏好
+    auto_refs: bool = True                 # True=用 topic 检索历史素材补充进 references
 
 
 class PipelineIssueReq(BaseModel):
@@ -42,6 +47,11 @@ def pipeline_start(body: PipelineStartReq) -> dict:
             references=body.references,
             platform=body.platform,
             review=body.review,
+            style_key=body.style_key,
+            word_count=body.word_count,
+            domains=body.domains,
+            forbidden_topics=body.forbidden_topics,
+            auto_supplement_refs=body.auto_refs,
         )
     except pipeline.PipelineUnavailable as e:
         # 503：环境缺脚本导致功能不可用，不是代码 bug，前端直接展示这句话

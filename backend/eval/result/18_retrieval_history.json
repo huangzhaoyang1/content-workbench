@@ -1,0 +1,19 @@
+{
+  "id": 18,
+  "category": "retrieval_history",
+  "question": "查询账号近 30 天阅读量最高的 5 篇文章并列出标题。",
+  "status": "ran",
+  "elapsed_sec": 0.002,
+  "service": "retrieval.search",
+  "passed": false,
+  "hits": [],
+  "missed": [
+    "阅读量",
+    "Top5",
+    "标题",
+    "近30天",
+    "账号"
+  ],
+  "output_excerpt": "[]",
+  "query": "查询账号近 30 天阅读量最高的 5 篇文章并列出标题。"
+}

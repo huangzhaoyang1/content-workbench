@@ -1,0 +1,19 @@
+{
+  "id": 14,
+  "category": "hotspot",
+  "question": "检索『AI 搜索』近 7 天热点，给 3 个可落地的公众号角度。",
+  "status": "ran",
+  "elapsed_sec": 0.0,
+  "service": "hotspot.search",
+  "passed": false,
+  "hits": [],
+  "missed": [
+    "AI搜索",
+    "热点",
+    "角度",
+    "落地",
+    "公众号"
+  ],
+  "output_excerpt": "{\n  \"items\": [],\n  \"origin\": \"示例数据(mock)\",\n  \"insight\": \"\"\n}",
+  "keyword": "AI 搜索"
+}

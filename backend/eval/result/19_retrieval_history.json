@@ -1,0 +1,19 @@
+{
+  "id": 19,
+  "category": "retrieval_history",
+  "question": "检索历史拆解记录里所有使用『认知升级』角度的改写文章。",
+  "status": "ran",
+  "elapsed_sec": 0.002,
+  "service": "retrieval.search",
+  "passed": false,
+  "hits": [],
+  "missed": [
+    "历史",
+    "认知升级",
+    "角度",
+    "拆解",
+    "检索"
+  ],
+  "output_excerpt": "[]",
+  "query": "检索历史拆解记录里所有使用『认知升级』角度的改写文章。"
+}

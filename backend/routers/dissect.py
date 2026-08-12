@@ -11,12 +11,14 @@
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from ..services.content import dissect
+from ..services.data import memory
 from ..services.system import queue as task_queue
 
 router = APIRouter(tags=["dissect"])
@@ -44,6 +46,9 @@ class AnalyzeReq(BaseModel):
     meta: dict[str, Any] | None = Field(
         None, description="上一步 /fetch 拿到的 source 结构，用户改过文案时用来保留视频元信息"
     )
+    session_id: str = Field(
+        "", description="会话 ID；填了则把最近 6 轮对话拼进上下文，并把本次输入输出存回记忆"
+    )
 
 
 @router.post("/douyin-dissect/analyze")
@@ -52,9 +57,26 @@ def analyze(body: AnalyzeReq) -> dict:
 
     text 与 url 二选一，两个都给时以 text 为准（手动粘贴的文案最完整）。
     一次拆解 + 三次并行改写，通常 60-180 秒。
+
+    传 session_id 即开启连续对话：先把最近 6 轮历史拼进拆解上下文，
+    再把本次「用户请求」与「拆解输出」存回记忆，下次同会话即可延续。
     """
     try:
-        return dissect.analyze(url=body.url or "", text=body.text or "", meta=body.meta)
+        context = ""
+        session_id = (body.session_id or "").strip()
+        if session_id:
+            context = memory.get_recent_context(session_id, limit=6)
+            # 先存用户输入轮（本轮的 text/url），历史上下文不含它
+            memory.save_turn(
+                session_id, "user", (body.text or body.url or "(链接拆解)").strip() or "(空输入)"
+            )
+        result = dissect.analyze(
+            url=body.url or "", text=body.text or "", meta=body.meta, context=context
+        )
+        if session_id:
+            # 输出原样存回（完整 JSON），供后续会话回看；拼上下文时会被截断
+            memory.save_turn(session_id, "assistant", json.dumps(result, ensure_ascii=False))
+        return result
     except dissect.DissectError as e:
         raise HTTPException(status_code=e.status_code, detail=str(e))
 

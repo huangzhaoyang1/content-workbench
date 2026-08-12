@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ..services.system.config import ConfigWriteError, load_config, save_config
+from ..services.data.preferences import load_preferences, save_preferences
 from ..services.integration import hotspot
 
 router = APIRouter(tags=["config"])
@@ -21,6 +22,10 @@ class ConnectionTestReq(BaseModel):
     deepseek: dict[str, Any] = {}
 
 
+class PreferencesUpdate(BaseModel):
+    preferences: dict[str, Any]
+
+
 @router.get("/config")
 def get_config() -> dict:
     """获取全部配置（复用现有 workbench_config.json 结构）。"""
@@ -32,6 +37,21 @@ def put_config(body: ConfigUpdate) -> dict:
     """更新配置并落盘。落盘失败时返回可读原因，而不是笼统的 500。"""
     try:
         return save_config(body.config)
+    except ConfigWriteError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@router.get("/config/preferences")
+def get_preferences() -> dict:
+    """获取用户偏好（默认平台 / 风格 / 字数 / 领域 / 禁写话题）。"""
+    return load_preferences()
+
+
+@router.put("/config/preferences")
+def put_preferences(body: PreferencesUpdate) -> dict:
+    """更新并落盘用户偏好；落盘失败时返回可读原因，而不是笼统的 500。"""
+    try:
+        return save_preferences(body.preferences)
     except ConfigWriteError as e:
         raise HTTPException(status_code=503, detail=str(e))
 

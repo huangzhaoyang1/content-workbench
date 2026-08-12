@@ -1,0 +1,19 @@
+{
+  "id": 12,
+  "category": "hotspot",
+  "question": "搜一下『大模型降价』相关热点，输出整体热点洞察和 3 条选题。",
+  "status": "ran",
+  "elapsed_sec": 0.0,
+  "service": "hotspot.search",
+  "passed": false,
+  "hits": [],
+  "missed": [
+    "大模型",
+    "降价",
+    "洞察",
+    "选题",
+    "热点"
+  ],
+  "output_excerpt": "{\n  \"items\": [],\n  \"origin\": \"示例数据(mock)\",\n  \"insight\": \"\"\n}",
+  "keyword": "大模型降价"
+}

@@ -14,6 +14,7 @@ import logging
 import re
 
 from ..system.config import load_config
+from ..system.llm_usage import call as llm_call
 from . import vision
 from .ocr_strategy import OcrError
 
@@ -23,62 +24,33 @@ _TIMEOUT = 90
 
 
 # --------------------------------------------------------------------------
-# 提示词
+# 提示词（视觉 / OCR 共用模板，按 OCR 模式注入参数）
 # --------------------------------------------------------------------------
-_STRUCTURE_SYSTEM = (
-    "你是一个严谨的数据提取助手，专门把微信公众号后台截图经本地 OCR 提取出的文字，"
-    "整理成结构化 JSON。你只输出 JSON，不输出任何解释、前言、Markdown 代码围栏或多余文字。"
+from ..prompts import load_ocr_shared
+
+_SHARED = load_ocr_shared()
+_STRUCTURE_SYSTEM = _SHARED["system"]
+# 阶段1：注入 OCR 专属参数。input_desc 内含 {engine}、input_block 内含 {text}，
+# 二者都留到调用时替换（等价原 _STRUCTURE_USER.format(engine=, text=)）。
+_USER_TEMPLATE = (
+    _SHARED["user"]
+    .replace("{input_desc}", "经本地 OCR（{engine}）识别出的文字")
+    .replace(
+        "{ocr_detail}",
+        "文字已按「行」整理，同一行的不同单元格用制表符（Tab）分隔，尽量保留了表格的列结构。",
+    )
+    .replace(
+        "{mode_rule}",
+        "若为 OCR 文字：OCR 可能把相似字认错（如「0/O」「1/l」「读/续」），根据上下文合理纠正明显的错别字，但数字不要猜，认不准就填 null 并在 note 里说明。",
+    )
+    .replace("{input_block}", "OCR 文字内容如下：\n```\n{text}\n```")
 )
 
-_STRUCTURE_USER = """下面是一张微信公众号后台截图，经本地 OCR（{engine}）识别出的文字。
-文字已按「行」整理，同一行的不同单元格用制表符（Tab）分隔，尽量保留了表格的列结构。
 
-请从中提取结构化数据，严格按以下 JSON 结构输出（只输出 JSON 本身）：
-{{
-  "articles": [
-    {{
-      "title": "文章标题原文",
-      "date": "YYYY-MM-DD",
-      "reads": 1234,
-      "likes": 12,
-      "wow": 8,
-      "shares": 20,
-      "collects": 5
-    }}
-  ],
-  "summary": {{
-    "followers_delta": 0,
-    "new_followers": 0,
-    "lost_followers": 0,
-    "total_reads": 0,
-    "date_range": ""
-  }},
-  "confidence": "high",
-  "note": ""
-}}
+def _build_user_text(engine: str, ocr_text: str) -> str:
+    """阶段2：替换 {engine} 与 {text}（等价合并前的 .format(engine=, text=)）。"""
+    return _USER_TEMPLATE.replace("{engine}", engine).replace("{text}", ocr_text)
 
-字段要求：
-1. articles：每一篇文章一条，按截图从上到下的顺序排列。
-2. title：抄写标题原文，不要改写、不要翻译、不要补全省略号以外的内容。
-3. date：发布日期统一转成 YYYY-MM-DD；截图里只有「月-日」时用截图中出现的年份；
-   完全没有年份就填 null，不要瞎猜。没有日期列就填 null。
-4. reads=阅读量/阅读人数，likes=在看数，wow=点赞数，shares=分享/转发数，collects=收藏数。
-5. 数字必须是纯整数，不要带逗号、不要带「次」「人」等单位；
-   截图里写「1.2万」要换算成 12000。某个字段截图里没有就填 null，绝对不要编造。
-6. summary：只有整体数据/概览类截图才填，followers_delta 是净增关注（可为负数）；
-   文章列表截图里没有这些信息就全部填 null。
-7. confidence：图片文字清晰、能确认所有数字填 "high"；部分模糊或 OCR 明显错字填 "low"，
-   并在 note 里用中文说明哪里看不清。
-8. OCR 可能把相似字认错（如「0/O」「1/l」「读/续」），根据上下文合理纠正明显的错别字，
-   但数字不要猜，认不准就填 null 并在 note 里说明。
-9. 如果这段文字根本不是公众号后台数据，返回 {{"articles": [], "summary": {{}}, "confidence": "low", "note": "不是公众号后台数据"}}。
-
-OCR 文字内容如下：
-```
-{text}
-```
-
-再次强调：只输出 JSON，不要输出 ```json 围栏，不要输出任何解释。"""
 
 
 # --------------------------------------------------------------------------
@@ -101,16 +73,15 @@ def _host(url: str) -> str:
 
 
 def _call_deepseek(cfg: dict, ocr_text: str, engine: str) -> str:
-    import requests  # 懒加载，和 hotspot.py / vision.py 保持一致
+    import requests  # 懒加载，和 hotspot.py / vision.py 保持一致（异常类型仍在此用到）
 
-    url = cfg["base_url"].rstrip("/") + "/chat/completions"
     payload = {
         "model": cfg["model"],
         "messages": [
             {"role": "system", "content": _STRUCTURE_SYSTEM},
             {
                 "role": "user",
-                "content": _STRUCTURE_USER.format(engine=engine, text=ocr_text),
+                "content": _build_user_text(engine, ocr_text),
             },
         ],
         "temperature": 0.0,
@@ -118,13 +89,11 @@ def _call_deepseek(cfg: dict, ocr_text: str, engine: str) -> str:
         "stream": False,
     }
     try:
-        r = requests.post(
-            url,
-            headers={
-                "Authorization": f"Bearer {cfg['api_key']}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
+        r = llm_call(
+            base_url=cfg["base_url"],
+            api_key=cfg["api_key"],
+            module="ocr_structure",
+            payload=payload,
             timeout=_TIMEOUT,
         )
     except requests.exceptions.Timeout as e:

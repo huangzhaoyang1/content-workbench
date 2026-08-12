@@ -264,6 +264,7 @@ export const api = {
     references?: string;
     platform?: string;
     review?: boolean;
+    autoRefs?: boolean;
   }) =>
     request<PipelineStartResult>("/api/pipeline/start", {
       method: "POST",

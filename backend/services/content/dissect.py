@@ -30,7 +30,9 @@ from pathlib import Path
 from typing import Any
 
 from ..system.config import DATA_DIR, load_config
+from ..system.llm_usage import call as llm_call
 from .quality import QUALITY_SELF_CHECK, QUALITY_SPEC, score_article
+from .validate import validate_dissect
 
 log = logging.getLogger("workbench.dissect")
 
@@ -103,9 +105,8 @@ def _chat(
     json_mode: bool = True,
 ) -> str:
     """调用 DeepSeek chat/completions，返回纯文本内容。"""
-    import requests  # 懒加载，与 hotspot.py / vision.py 保持一致
+    import requests  # 懒加载，与 hotspot.py / vision.py 保持一致（异常类型仍在此用到）
 
-    url = cfg["base_url"].rstrip("/") + "/chat/completions"
     payload: dict[str, Any] = {
         "model": cfg["model"],
         "messages": [
@@ -120,13 +121,11 @@ def _chat(
         payload["response_format"] = {"type": "json_object"}
 
     try:
-        r = requests.post(
-            url,
-            headers={
-                "Authorization": f"Bearer {cfg['api_key']}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
+        r = llm_call(
+            base_url=cfg["base_url"],
+            api_key=cfg["api_key"],
+            module="dissect",
+            payload=payload,
             timeout=timeout,
         )
     except requests.exceptions.Timeout as e:
@@ -505,147 +504,14 @@ def fetch_douyin_text(raw_url: str) -> dict:
 # ---------------------------------------------------------------------------
 # 提示词
 # ---------------------------------------------------------------------------
-_DISSECT_SYSTEM = (
-    "你是一名做了 8 年短视频和公众号的内容运营专家，尤其擅长拆解知识科普类爆款视频，"
-    "并判断哪些要素能迁移到图文平台。\n"
-    "你干活分两步，缺一不可：\n"
-    "第一步是**素材提取**——像做庭审记录一样，把原文里所有具体案例、具体数字、"
-    "原话金句、论证步骤、提到的工具方法，一条条抠出来，逐字引用，不许概括、不许美化、"
-    "更不许编造原文没有的东西；原文确实没有的类别就留空数组并说明。\n"
-    "第二步才是**分析判断**，而且每一条结论都要能指回第一步抠出来的某条素材。\n"
-    "禁止「内容优质」「贴近用户」「引发共鸣」这类换个视频也成立的正确的废话。\n"
-    "你只输出 JSON，不输出任何解释、前言或 Markdown 围栏。"
-)
+from ..prompts import load_dissect, load_dissect_angles, load_dissect_default_style
 
-_DISSECT_USER = """下面是一条抖音知识科普类视频的文案（口播稿/字幕）。请像给同事做内部复盘一样把它拆透。
+_DSECT = load_dissect()
+_DISSECT_SYSTEM = _DSECT["_DISSECT_SYSTEM"]
+_DISSECT_USER = _DSECT["_DISSECT_USER"]
+_REWRITE_FEW_SHOT = _DSECT["_REWRITE_FEW_SHOT"]
+_DEFAULT_STYLE = load_dissect_default_style()
 
-严格按以下 JSON 结构输出（只输出 JSON 本身）：
-{{
-  "basics": {{
-    "title": "给这条视频起一个概括性的标题（20 字内）",
-    "summary": "用 2-3 句话讲清楚这条视频到底说了什么",
-    "duration_sec": 60,
-    "word_count": 0,
-    "type_tags": ["反常识"],
-    "topic": "一句话概括这条视频的选题方向"
-  }},
-  "materials": {{
-    "views": [
-      {{"point": "原文抛出的一个具体观点/分论点/核心判断（哪怕是很小的观点也要单列）", "detail": "支撑这个观点的原文依据：可引用的原话，或它出现的位置/上下文"}}
-    ],
-    "cases": [
-      {{"what": "原文里的一个具体案例/故事/真实经历，用原文说法概括", "detail": "这个案例里的关键细节：谁、做了什么、结果如何（尽量引用原话）"}}
-    ],
-    "numbers": [
-      {{"value": "原文出现的具体数字，含单位，如「3 个月」「800 块」「涨了 5 倍」", "context": "这个数字在原文里是用来说明什么的"}}
-    ],
-    "quotes": ["原文里的金句/反常识断言/爆点句，逐字抄原话，不要改写"],
-    "logic_chain": ["论证第 1 步：作者先说了什么", "第 2 步：由此推出什么", "第 3 步：最后落到什么结论"],
-    "methods": [
-      {{"name": "原文提到的工具/方法/步骤/操作建议名", "usage": "原文里说的具体用法、步骤、参数或操作建议"}}
-    ],
-    "completeness": {{
-      "level": "full",
-      "missing": ["这段文案里缺失的素材类型，如：没有任何具体数字"],
-      "note": "一句话说明这份素材够不够支撑写一篇有料的公众号文章"
-    }}
-  }},
-  "hook": {{
-    "quote": "原文里前 3 秒/前 3 句的原话，直接抄，不要改写",
-    "technique": "用到的钩子手法，如：反常识断言 / 痛点提问 / 利益点前置 / 悬念倒叙 / 身份代入",
-    "why": "为什么这个钩子能在 3 秒内拦住人，讲清楚心理机制（2-3 句）",
-    "score": 8
-  }},
-  "structure": [
-    {{
-      "stage": "起",
-      "seconds": "0-5s",
-      "label": "这一段在干什么（6 字内）",
-      "content": "这一段的原文要点",
-      "role": "它在整条视频里承担的作用"
-    }}
-  ],
-  "boom": {{
-    "core": "一句话说清这条为什么能火",
-    "reasons": ["具体原因1（要能对应到文案里的手法）", "具体原因2", "具体原因3"],
-    "emotion": "戳中的情绪或爽点，如：认知被刷新 / 焦虑被命名 / 省钱省时间 / 找到同类"
-  }},
-  "audience": {{
-    "who": "主要打动的人群画像，要具体到身份+处境",
-    "pain": "这群人当下最真实的痛点",
-    "scene": "他们大概在什么场景下刷到并转发这条"
-  }},
-  "portable": [
-    {{"point": "可以直接搬到公众号的东西", "how": "具体怎么搬，落到动作上"}}
-  ],
-  "migration": {{
-    "titles": ["公众号标题备选1", "备选2", "备选3"],
-    "opening": "公众号开头应该怎么改才抓得住人（讲清楚改法，不是写好的开头）",
-    "expand": ["视频里一带而过、公众号可以展开写的点1", "点2", "点3"],
-    "ending": "结尾怎么引导互动/关注，给具体做法"
-  }}
-}}
-
-【materials 是这次拆解最重要的字段，优先把它做扎实，规则如下】
-M0. materials 的五个清单（views 观点 / cases 案例 / numbers 数据 / quotes 金句 / methods 方法）
-    是这次拆解最核心的交付物，目标是「信息无损」：原文里出现的观点、案例、数字、金句、方法，
-    只要出现了就不要漏。宁可多列几条，也不要替我总结掉。
-M1. views / cases / numbers / quotes / methods 里的内容**必须来自原文**，尽量逐字引用。
-    宁可少写一条，也不许编造原文没有的东西——编造会直接毒化后续改写。
-M2. views 收所有观点：核心观点、分论点、小判断，哪怕是很小的观点也要单列出来，
-    不要只列大标题，拆到能单独成句的小观点；detail 写支撑它的原文原话或上下文。
-M3. numbers 要把原文里出现的每一个数字都收进来：时间、金额、次数、比例、
-    时长、人数、版本号都算。原文一个数字都没有，就返回空数组，
-    并在 completeness.missing 里写「全文无任何具体数字」。
-M4. quotes 只收「脱离上下文也成立、能单独截图」的句子，3-8 条；
-    普通陈述句不要收。禁止改写，逐字抄。
-M5. logic_chain 要还原作者的完整论证路径，3-6 步，
-    每一步写清楚「说了什么 → 因此推出什么」，不要只列小标题。
-M6. methods 收所有被点名的工具、平台、方法论、话术模板、操作步骤、操作建议。
-    原文只提名字没说用法，usage 就写「原文未展开」。
-M7. completeness.level 只能是 "full"（观点+案例+数字+金句+方法 五类里至少 4 类各有 1 条）、
-    "partial"（只抠到 2-3 类）、"thin"（几乎抠不出具体素材，多半只拿到了标题或简介）。
-    判断要诚实，thin 就写 thin——我需要据此决定要不要重新粘贴完整文案。
-
-字段要求：
-1. type_tags 只能从 ["反常识", "痛点", "干货", "故事", "经验"] 里选，可多选，最多 3 个。
-2. duration_sec 按中文口播每分钟约 300 字估算，取整数秒；word_count 填文案实际字数。
-3. structure 按「起承转合」的实际段落拆，2-6 段，段数以文案真实结构为准，不要硬凑四段。
-   seconds 按字数比例估算，格式如 "0-8s"。
-4. hook.score 是 1-10 的钩子强度打分，8 分以上要说得出过硬理由。
-5. reasons / expand / portable 每条都要具体到「这条文案里的哪句话、哪个手法」，
-   出现「内容有价值」「符合用户需求」这类空话视为不合格。
-6. migration.titles 三个标题风格要拉开：一个日记体、一个数字体、一个反差体，都控制在 22 字内。
-7. 如果这段文字根本不是视频文案（例如是一段代码、一堆链接或乱码），
-   返回 {{"error": "这段内容不像视频文案，请粘贴抖音口播稿或字幕"}}。
-
-视频文案如下：
-```
-{text}
-```
-
-再次强调：只输出 JSON，不要输出 ```json 围栏，不要输出任何解释。"""
-
-
-# 「扬」的典型文风示例：给改写模型做 few-shot，模仿具体语感和节奏。
-# 后续可从历史文章中随机抽取，这里先硬编码三篇好文的代表性片段。
-_REWRITE_FEW_SHOT = """【示例1 · 踩坑叙事】
-昨天试了一下用 AI 写小红书文案，结果翻车了。
-不是 AI 写得不好——是太好了，好到一看就是 AI 写的。
-后来我改了个思路：先让 AI 出框架，再自己往里填大白话，效果反而好了。
-
-【示例2 · 干货总结】
-搞了两周，终于摸清了 AI 写公众号的套路。
-核心就一句话：别让 AI 自由发挥，给它框死结构。
-我现在固定用「场景切入→踩坑过程→改法→小结」四段式，每篇省一半时间。
-
-【示例3 · 认知升级】
-之前一直觉得学 AI 就是学工具——Prompt 怎么写、Midjourney 怎么画。
-上周跟一个做了 3 年自媒体的朋友聊完，才发现方向反了。
-工具随时会更新，但「怎么用内容解决一个具体问题」这个能力不会过时。"""
-
-# 账号默认文风（与 _shared_ctx 里的兜底一致），用于判断是否追加自定义 style 补充。
-_DEFAULT_STYLE = "真实、有用、可跟；第一人称，像跟朋友聊天"
 
 
 def _build_few_shot(style: str) -> str:
@@ -656,206 +522,11 @@ def _build_few_shot(style: str) -> str:
     return few_shot
 
 
-_REWRITE_SYSTEM = """你是「{account}」这个公众号的主理人本人，笔名扬。
-
-你的人设：一个正在用 AI 搞副业的普通人，非技术出身，每天记录真实的学习过程。
-你不是专家，也不装专家——你的可信度来自「我真的试过、我真的踩过坑」。
-
-写作铁律：
-1. 第一人称「我」，像跟朋友在微信里聊天，可以有口语、有停顿、有自嘲。
-2. 不许写「随着人工智能的发展」「在这个时代」这种 AI 腔开场。
-3. 不许过度承诺（「月入过万」「轻松躺赚」「一键搞定」这类词直接禁用）。
-4. 有观点就明说，不确定就承认不确定，比假装全懂更可信。
-5. 每个结论后面必须跟一个具体的场景、数字或动作，读者要能照着做。
-
-以下是你（扬）过去写过的几段文字，感受一下语感和节奏：
-{few_shot_examples}
-
-本次你只负责写**一种角度**的文章：{angle_label}。
-{angle_persona}
-
-你只输出 JSON，不输出任何解释、前言或 Markdown 围栏。"""
-
-
-# ---------------------------------------------------------------------------
-# 三种改写角度：骨架 / 主料 / 禁区 各不相同，避免「一篇文章换三个标题」
-# ---------------------------------------------------------------------------
-REWRITE_ANGLES: list[dict[str, str]] = [
-    {
-        "key": "pitfall",
-        "label": "踩坑经历",
-        "desc": "第一人称故事，讲一次具体的失败和它的转折",
-        "persona": (
-            "这一篇你要当一个刚从坑里爬出来的人在讲故事，不是老师。"
-            "全程按时间线推进，允许啰嗦、允许自嘲、允许承认当时很蠢。"
-        ),
-        "skeleton": """【本篇骨架（必须按这个顺序写，不许改成说明书结构）】
-1. 开场直接落在一个具体的失败现场：那天几点、我在干什么、哪一步炸了。
-   不要总起句，不要背景介绍，第一句话就是场景。
-2. 我当时是怎么想的——把那个错误认知原原本本写出来（这是全文最值钱的部分）。
-3. 撞墙过程：2-3 个具体节点，每个节点都要有动作 + 结果 + 当时的心理活动。
-4. 转折点：是哪一句话/哪一个发现让我意识到搞错了方向。
-5. 现在我怎么做：把改法写成 3-5 条，但语气仍然是「我现在都这么干」而不是「你应该」。
-6. 结尾对着还在坑里的人说一句话 + 一个开放式提问。""",
-        "primary": "cases、numbers、views（案例、数字、观点是主料，必须大量用）",
-        "secondary": "quotes 可以穿插引用，methods 只在讲改法时点到",
-        "forbidden": (
-            "禁止写成分点说明书；禁止一上来给方法论；"
-            "禁止出现「三个步骤」「五个方法」这类干货体标题；禁止讲抽象的底层逻辑。"
-        ),
-        "title_style": "日记体 / 自曝体，带具体时间或数字，例如「我在 XX 上浪费了 3 天，就因为搞错了这一步」",
-        "words": "1400-1800",
-        "temp": "0.85",
-    },
-    {
-        "key": "howto",
-        "label": "干货总结",
-        "desc": "方法清单，读者能直接照抄执行",
-        "persona": (
-            "这一篇你要当一个把流程整理清楚的实操者，句子短、动词多、不抒情。"
-            "读者读完应该能立刻打开电脑照着做。"
-        ),
-        "skeleton": """【本篇骨架（必须按这个顺序写，不许写成故事）】
-1. 开篇一句话给结论：这套方法解决什么问题、能省多少时间/多少步。要带数字。
-2. 适用前提：什么情况下用得上，什么情况下别用（把不适用的情况也写出来，更可信）。
-3. 主体是 3-5 个步骤，每一步固定三小块：
-   · 具体做什么（动词开头，能操作）
-   · 怎么判断这一步做对了（给一个可观察的标志）
-   · 常见错法（大多数人在这一步会怎么做错）
-4. 一张自查清单：用无序列表列出 4-6 条，读者可以对着打勾。
-5. 结尾给「今天就能做的第一步」，只要一个动作，5 分钟内能完成 + 开放式提问。""",
-        "primary": "methods、logic_chain（工具方法和步骤是主料，必须逐条落地）",
-        "secondary": "numbers 用来当参数和标准，cases 只能压缩成一句话举例",
-        "forbidden": (
-            "禁止长篇故事；禁止情绪铺垫；禁止「我那天……」式开场；"
-            "禁止讲哲学和认知，只讲怎么做。"
-        ),
-        "title_style": "数字体 / 清单体，例如「AI 写文案的 5 步流程，我把踩过的坑都标出来了」",
-        "words": "1200-1600",
-        "temp": "0.7",
-    },
-    {
-        "key": "insight",
-        "label": "认知升级",
-        "desc": "观点文，拆底层逻辑，给一个新的思考模型",
-        "persona": (
-            "这一篇你要当一个想明白了某件事、忍不住要跟朋友掰扯清楚的人。"
-            "有立场、敢下判断，但每个判断都要给理由，不能只喊口号。"
-        ),
-        "skeleton": """【本篇骨架（必须按这个顺序写，不许写成教程也不许写成流水账）】
-1. 先原样摆出大多数人的默认认知：「大家普遍觉得 X」，写得越具体越好。
-2. 指出它哪里错了——这是本篇的反常识核心，必须尖锐、必须给出判断。
-3. 底层机制：为什么会形成这个误解？拆到原因层，2-3 层往下追问。
-   这一段是全篇密度最高的地方，要有推理链条，不能只给结论。
-4. 换一个模型看这件事：给读者一个可以复用的思考框架（起个好记的名字）。
-5. 这个认知具体改变了我的哪一个决策——必须落到一件真实的、具体的小事上，带数字。
-6. 结尾一句能被记住的话 + 开放式提问。""",
-        "primary": "views、quotes、logic_chain（观点/金句/论证链是主料，要把作者的推理往下再推一层）",
-        "secondary": "cases 用作论据，numbers 用来给判断加砝码，methods 基本不提",
-        "forbidden": (
-            "禁止把主体写成操作步骤；禁止流水账叙事；"
-            "禁止只抛观点不给理由；禁止和另外两篇共用同一个开头场景。"
-        ),
-        "title_style": "反差体 / 观点体，例如「大部分人学 AI 的方向从一开始就反了」",
-        "words": "1300-1700",
-        "temp": "0.8",
-    },
-]
-
+_REWRITE_SYSTEM = _DSECT["_REWRITE_SYSTEM"]
+REWRITE_ANGLES = load_dissect_angles()
 ANGLE_KEYS = tuple(a["key"] for a in REWRITE_ANGLES)
+_REWRITE_USER = _DSECT["_REWRITE_USER"]
 
-
-_REWRITE_USER = """把下面这条抖音爆款视频，改写成一篇发在「{account}」上的公众号文章。
-
-这不是翻译，是**内容迁移**：原视频已经验证过选题能火，你要做的是把它的核心观点和爆点，
-用公众号的节奏重新讲一遍，并且补上视频里没空展开的细节。
-
-⚠️ 本次只写一种角度：**{angle_label}**（{angle_desc}）。
-同一条视频我会另外用其他角度各写一篇，所以这一篇必须**只做这个角度**，
-不许为了完整而把其他角度的内容也塞进来。
-
-【原视频文案】
-```
-{text}
-```
-
-【核心素材清单 —— 这是本次改写的硬性原料，必须用上】
-▸ 核心观点（改写时必须在正文里有所体现，尤其 insight 角度）：
-{m_views}
-▸ 具体案例/故事：
-{m_cases}
-▸ 具体数字/时间点：
-{m_numbers}
-▸ 金句/反常识观点：
-{m_quotes}
-▸ 论证逻辑链：
-{m_logic}
-▸ 工具/方法/步骤：
-{m_methods}
-▸ 素材完整度：{m_completeness}
-
-素材使用规则（违反即不合格）：
-- 本篇的主料是：{angle_primary}
-- 辅料是：{angle_secondary}
-- 清单里的**数字必须原样出现在正文里**，一个都不许含糊成「很多」「不少」「大幅」。
-- 清单里的案例要展开写成有画面的段落，不能只提一句名字。
-- 观点清单里每条核心观点都要在正文里有所体现（用作论点或判断依据），不许整条丢弃不提。
-- 方法清单（工具/步骤）若是本篇主料，要逐条落地写进正文，标明怎么做。
-- 如果某类素材是空的，不许编造，改为写「我自己准备怎么试」并明确标注这是我的计划。
-- 在 materials_used 字段里如实列出你实际用到了清单中的哪几条。
-
-【差异化硬约束】你正在为同一条视频写三个不同角度中的第 {angle_index}/3 篇。
-三篇之间必须满足：
-  - 开头场景不能相同（如果第一篇用了'学 XX 的时候'，这篇就换'刷到一条消息'或'朋友问我'）
-  - 核心案例不能重复（第一篇用了案例 A，这篇用案例 B 或 C）
-  - 金句最多共用一句
-  - 结尾提问方向不能相同
-如果做不到差异化，宁可降低素材使用率，也不要写出跟其他角度雷同的文章。
-
-【已完成的爆款拆解（据此保留爆点）】
-- 选题类型：{tags}
-- 钩子手法：{hook_tech}｜钩子原话：{hook_quote}
-- 爆点核心：{boom_core}
-- 目标人群：{audience}
-- 可展开的点：{expand}
-- 结尾引导建议：{ending}
-
-【账号信息】
-- 名称：{account}
-- 内容定位：{positioning}
-- 文风要求：{style}
-
-{angle_skeleton}
-
-【本篇禁区】
-{angle_forbidden}
-
-严格按以下 JSON 结构输出（只输出 JSON 本身）：
-{{
-  "titles": ["标题备选1", "标题备选2", "标题备选3"],
-  "theme": "主题分类，从 [AI工具, AI副业, 学习方法, 行业观察, 个人成长] 里选一个",
-  "digest": "公众号摘要，一句话，60 字以内",
-  "content": "完整的公众号正文，Markdown 格式",
-  "word_count": 0,
-  "changes": ["相比原视频做的关键改动1", "改动2", "改动3"],
-  "materials_used": ["实际用到的素材清单条目，逐条写清楚用在哪一段"]
-}}
-
-【标题要求】
-- 三个标题都要贴合本篇角度：{angle_title_style}
-- 都控制在 22 字以内，不做标题党，但必须有具体信息量（数字 / 反差 / 场景三选一）。
-
-{quality_spec}
-
-【本篇额外硬指标】
-- 全文 {angle_words} 字。
-- 开头 2-3 句可以自我介绍式切入（例如「嗨，我是扬。」），但紧接着必须按本篇骨架第 1 步走。
-- 不要出现「这条视频」「抖音上」「有位博主」这种暴露搬运痕迹的表述，要写得像你自己的思考。
-- content 字段里不要包含文章大标题（标题单独放 titles 里），直接从正文开始。
-
-{quality_check}
-
-再次强调：只输出 JSON，不要输出 ```json 围栏。content 字段里的换行用 \\n 转义。"""
 
 
 # ---------------------------------------------------------------------------
@@ -1215,7 +886,7 @@ def _shared_ctx(dissect_data: dict, raw: str) -> tuple[str, dict]:
     shared = {
         "account": account,
         "positioning": account_cfg.get("positioning") or "非技术小白跟扬一起学 AI、一起搞副业",
-        "style": account_cfg.get("style") or "真实、有用、可跟；第一人称，像跟朋友聊天",
+        "style": account_cfg.get("style") or load_dissect_default_style(),
         "text": raw,
         "tags": "、".join(dissect_data["basics"]["type_tags"]),
         "hook_tech": dissect_data["hook"]["technique"] or "（未识别）",
@@ -1332,8 +1003,12 @@ def rewrite_one(angle_key: str, raw_text: str, dissect_data: Any = None) -> dict
     }
 
 
-def analyze(url: str = "", text: str = "", meta: Any = None) -> dict:
-    """拆解 + 改写。返回 {dissect, rewrite, rewrites, source, model, elapsed_sec}。"""
+def analyze(url: str = "", text: str = "", meta: Any = None, context: str = "") -> dict:
+    """拆解 + 改写。返回 {dissect, rewrite, rewrites, source, model, elapsed_sec}。
+
+    context 为可选的「历史对话上下文」文本（由调用方从记忆里取好再传进来），
+    非空时拼到拆解 prompt 前面，让本次拆解延续之前的背景与偏好。
+    """
     cfg = _deepseek_cfg()
     if not cfg["api_key"]:
         raise DissectError(
@@ -1367,15 +1042,45 @@ def analyze(url: str = "", text: str = "", meta: Any = None) -> dict:
         source["note"] = (source.get("note") or "") + " 文案超过 6000 字，已截断后半部分。"
 
     # 第一步：拆解
+    user_prompt = _DISSECT_USER.format(text=raw)
+    if context and context.strip():
+        user_prompt = (
+            "以下是与用户的近期对话记录，用于理解背景与偏好，拆解时请延续上下文：\n"
+            f"{context}\n\n"
+            "———— 以上是历史上下文 ————\n\n"
+            f"{user_prompt}"
+        )
     dissect_raw = _chat(
         cfg,
         _DISSECT_SYSTEM,
-        _DISSECT_USER.format(text=raw),
+        user_prompt,
         temperature=0.3,
         max_tokens=4000,
         timeout=_DISSECT_TIMEOUT,
     )
-    dissect = _normalize_dissect(_extract_json(dissect_raw), raw)
+    # 结构硬校验（M 项）：LLM 输出解析为 dict 后、归一化前先过校验。
+    # 失败则把校验错误作为补充提示回灌模型重试 1 次；重试仍失败走现有错误路径。
+    parsed = _extract_json(dissect_raw)
+    ok, verrs = validate_dissect(parsed)
+    if not ok:
+        retry_user = (
+            user_prompt
+            + "\n\n【重要】上一轮输出未通过结构校验，请严格按下方字段要求重新输出 JSON：\n"
+            + "\n".join(f"- {e}" for e in verrs[:8])
+        )
+        dissect_raw = _chat(
+            cfg,
+            _DISSECT_SYSTEM,
+            retry_user,
+            temperature=0.3,
+            max_tokens=4000,
+            timeout=_DISSECT_TIMEOUT,
+        )
+        parsed = _extract_json(dissect_raw)
+        ok, verrs = validate_dissect(parsed)
+        if not ok:
+            raise DissectError("拆解结果结构校验未通过：" + "；".join(verrs[:6]))
+    dissect = _normalize_dissect(parsed, raw)
 
     # 素材太薄就提前警告，不让用户拿着一份空拆解发懵
     warnings: list[str] = []

@@ -9,10 +9,13 @@
 """
 from __future__ import annotations
 
+from datetime import date, datetime, timedelta
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+import json
 from pydantic import BaseModel, Field, field_validator
 
 from ..services.data import analytics, ocr_baidu, ocr_strategy, ocr_tesseract, vision
+from ..services.system import llm_usage
 
 router = APIRouter(tags=["analytics"])
 
@@ -264,4 +267,102 @@ def import_articles(body: ImportReq) -> dict:
         "skipped": res["skipped"],
         "duplicates": res["duplicates"],
         "dataset": _summary(res["dataset"]),
+    }
+
+
+# ==========================================================================
+# LLM 调用成本汇总
+# ==========================================================================
+def _week_start(d: date) -> date:
+    """本周一（ISO：周一为一周起点）。"""
+    return d - timedelta(days=d.weekday())
+
+
+def _empty_bucket() -> dict:
+    return {
+        "calls": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "cost_est": 0.0,
+    }
+
+
+def _add(bucket: dict, rec: dict) -> None:
+    bucket["calls"] += 1
+    bucket["prompt_tokens"] += int(rec.get("prompt_tokens") or 0)
+    bucket["completion_tokens"] += int(rec.get("completion_tokens") or 0)
+    bucket["total_tokens"] += int(rec.get("prompt_tokens") or 0) + int(rec.get("completion_tokens") or 0)
+    bucket["cost_est"] += float(rec.get("cost_est") or 0.0)
+
+
+@router.get("/analytics/llm-cost")
+def llm_cost() -> dict:
+    """返回今日 / 本周 / 本月 / 全部的 LLM 调用量与费用估算。
+
+    数据源：backend/data/llm_usage.jsonl（由 services/system/llm_usage.py 写入）。
+    仅做量级估算（合并缓存命中/未命中等复杂计费为单一定价），非精确账单。
+    文件不存在或为空时返回全 0 的骨架。
+    """
+    today = date.today()
+    week_start = _week_start(today)
+    month_start = today.replace(day=1)
+
+    buckets = {
+        "today": _empty_bucket(),
+        "week": _empty_bucket(),
+        "month": _empty_bucket(),
+        "all": _empty_bucket(),
+    }
+    by_module: dict[str, dict] = {}
+    recent: list[dict] = []
+
+    try:
+        lines = llm_usage.USAGE_PATH.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        lines = []
+    except Exception:
+        lines = []
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        rec_date_str = (rec.get("time") or "")[:10]
+        try:
+            rec_date = datetime.strptime(rec_date_str, "%Y-%m-%d").date()
+        except ValueError:
+            rec_date = None
+        _add(buckets["all"], rec)
+        if rec_date is not None:
+            if rec_date == today:
+                _add(buckets["today"], rec)
+            if rec_date >= week_start:
+                _add(buckets["week"], rec)
+            if rec_date >= month_start:
+                _add(buckets["month"], rec)
+        mod = rec.get("module") or "unknown"
+        by_module.setdefault(mod, _empty_bucket())
+        _add(by_module[mod], rec)
+        recent.append(rec)
+
+    for b in (buckets.values()):
+        b["cost_est"] = round(b["cost_est"], 4)
+    for b in by_module.values():
+        b["cost_est"] = round(b["cost_est"], 4)
+
+    recent.sort(key=lambda r: (r.get("time") or ""), reverse=True)
+    return {
+        "currency": "CNY",
+        "note": "费用估算为量级参考（合并缓存命中/未命中等复杂计费为单一定价），非精确账单。",
+        "today": buckets["today"],
+        "week": buckets["week"],
+        "month": buckets["month"],
+        "all": buckets["all"],
+        "by_module": by_module,
+        "recent": recent[:10],
     }
