@@ -166,6 +166,14 @@ def _check_forbidden_words(content: str) -> list[dict]:
     return hits
 
 
+def _strip_code_fences(content: str) -> str:
+    """去掉 ``` 围栏代码块，避免内部的 `**...**` 被误算成粗体。
+
+    仅用于 Markdown 粗体计数（HTML 红字本身不会写在代码围栏里，不受影响）。
+    """
+    return re.sub(r"```.*?```", "", content, flags=re.S)
+
+
 def _paragraphs(content: str) -> list[str]:
     return [p.strip() for p in re.split(r"\n\s*\n", content or "") if p.strip()]
 
@@ -190,7 +198,12 @@ def _score_format(content: str) -> tuple[float, list[str]]:
     tips: list[str] = []
     headings = re.findall(r"^\s{0,3}#{2,3}\s+(.+)$", content, re.M)
     emoji_headings = [h for h in headings if emoji.emoji_count(h) > 0]
-    red = len(re.findall(r'<font\s+color=["\']?red', content, re.I))
+    # 红色加粗计数：HTML 红字 <font color=red> 与 Markdown 粗体 **...** 合计。
+    # Markdown 粗体在代码围栏内不算（避免示例里的 **x** 被误计）。
+    body_no_code = _strip_code_fences(content)
+    html_red = len(re.findall(r'<font\s+color=["\']?red', content, re.I))
+    md_bold = len(re.findall(r"\*\*(.+?)\*\*", body_no_code))
+    red = html_red + md_bold
     quotes = len(re.findall(r"^\s{0,3}>\s+\S", content, re.M))
     lists = len(re.findall(r"^\s{0,3}(?:[-*+]\s+|\d+[.、)]\s+)\S", content, re.M))
 
