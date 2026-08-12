@@ -6,11 +6,13 @@ import {
   AlertTriangle,
   CalendarDays,
   CheckCircle2,
+  FileText,
   History,
   Layers,
   ListChecks,
   RefreshCw,
   Search,
+  ShieldCheck,
   Tag,
   Timer,
   Trash2,
@@ -86,6 +88,9 @@ export default function TasksPage() {
   const [reviewBusy, setReviewBusy] = useState(false);
   const [enqueuingId, setEnqueuingId] = useState<number | null>(null);
 
+  // 审核模式：从侧边栏「审核」入口（/tasks?review=1）进入时，仅显示待审核任务。
+  const [review, setReview] = useState(false);
+
   // 轮询发布态期间若组件卸载，停止 setState / 清掉定时器，避免内存泄漏与控制台告警。
   const mountedRef = useRef(true);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -107,6 +112,7 @@ export default function TasksPage() {
       time_range: string;
       tag: string;
       page: number;
+      page_size: number;
     }>) => {
       setLoading(true);
       setError(null);
@@ -118,7 +124,7 @@ export default function TasksPage() {
           time_range: override?.time_range ?? timeRange,
           tag: override?.tag ?? tag,
           page: override?.page ?? page,
-          page_size: PAGE_SIZE,
+          page_size: override?.page_size ?? PAGE_SIZE,
         });
         setData(res);
         if (res.page !== (override?.page ?? page)) setPage(res.page);
@@ -192,7 +198,11 @@ export default function TasksPage() {
   };
 
   useEffect(() => {
-    void load({ page: 1 });
+    const reviewParam =
+      new URLSearchParams(window.location.search).get("review") === "1";
+    setReview(reviewParam);
+    // 审核模式多拉一些，尽量把待审核任务收进首屏；否则按默认分页。
+    void load({ page: 1, page_size: reviewParam ? 50 : PAGE_SIZE });
     void loadTags();
     // 只在首次挂载时拉一次，之后由筛选动作触发
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -392,6 +402,11 @@ export default function TasksPage() {
   const stats = data?.stats;
   const pages = data?.pages ?? 1;
 
+  // 审核模式：仅展示待审核（PENDING_REVIEW）的任务。
+  const visibleTasks = review
+    ? (data?.tasks ?? []).filter((t) => t.draft_status === "PENDING_REVIEW")
+    : (data?.tasks ?? []);
+
   return (
     <PageShell>
       <PageHeader
@@ -399,6 +414,10 @@ export default function TasksPage() {
         description="往期产出一览。看到跑得好的选题，可以直接复用或再排一期。"
         actions={
           <>
+            <LinkButton href="/topic" size="sm">
+              <FileText className="h-4 w-4" />
+              发起出稿
+            </LinkButton>
             <LinkButton href="/queue" variant="ghost" size="sm">
               <ListChecks className="h-4 w-4" />
               任务队列
@@ -415,6 +434,27 @@ export default function TasksPage() {
           </>
         }
       />
+
+      {/* 审核模式：从侧边栏「审核」进入，仅显示待审核任务 */}
+      {review && (
+        <Alert variant="warning" className="mt-4">
+          <ShieldCheck className="h-4 w-4" />
+          <AlertDescription className="flex flex-1 flex-wrap items-center gap-2">
+            <span>审核模式：当前仅显示待审核任务，确认后一键发布或放弃。</span>
+            <Button
+              size="xs"
+              variant="outline"
+              className="ml-auto"
+              onClick={() => {
+                setReview(false);
+                router.push("/tasks");
+              }}
+            >
+              退出审核模式
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Tab 切换：历史任务 / 回收站 */}
       <div className="mt-4 flex w-fit items-center gap-1 rounded-lg border border-border bg-muted/20 p-1">
@@ -616,7 +656,9 @@ export default function TasksPage() {
             任务列表
             {data && (
               <span className="ml-2 text-sm font-normal text-muted-foreground">
-                共 {data.total_filtered} 条
+                {review
+                  ? `待审核 ${visibleTasks.length} 条`
+                  : `共 ${data.total_filtered} 条`}
               </span>
             )}
           </CardTitle>
@@ -659,21 +701,29 @@ export default function TasksPage() {
                 <Skeleton key={i} className="h-28 w-full" />
               ))}
             </div>
-          ) : !data || data.tasks.length === 0 ? (
+          ) : !data || visibleTasks.length === 0 ? (
             <EmptyState
               icon={History}
               title={
-                data && data.stats.total > 0
+                review
+                  ? "没有待审核的任务"
+                  : data && data.stats.total > 0
                   ? "当前筛选条件下没有任务"
                   : "还没有任何产出记录"
               }
               description={
-                data && data.stats.total > 0
+                review
+                  ? "所有成稿都已处理，去「选题」再生产几期吧。"
+                  : data && data.stats.total > 0
                   ? "把状态或时间范围调回「全部」再看看。"
                   : "去「选题与生产」跑一次流水线，或者在「任务队列」里排几期。"
               }
               action={
-                data && data.stats.total > 0 ? (
+                review ? (
+                  <LinkButton href="/topic" size="sm">
+                    去生产新一期
+                  </LinkButton>
+                ) : data && data.stats.total > 0 ? (
                   <Button
                     size="sm"
                     variant="outline"
@@ -710,7 +760,7 @@ export default function TasksPage() {
             />
           ) : (
             <div className="space-y-3">
-              {data.tasks.map((t) => (
+              {visibleTasks.map((t) => (
                 <TaskCard
                   key={t.issue}
                   task={t}
