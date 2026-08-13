@@ -9,9 +9,12 @@
 """
 from __future__ import annotations
 
+import json
 import re
 
 from ..data import analytics
+from ..system.llm_usage import call as llm_call
+from ..prompts import load_topic
 
 # 5 个固定切入角度
 _ANGLES = [
@@ -226,27 +229,139 @@ def _auto_context() -> tuple[str, list[dict]]:
 # ---------------------------------------------------------------------------
 # 选题生成
 # ---------------------------------------------------------------------------
-def generate(
+def _deepseek_cfg(cfg: dict) -> dict | None:
+    """取 DeepSeek 子配置（base_url/api_key/model）；缺 key 返回 None。"""
+    ds = (cfg.get("deepseek") or {}) if isinstance(cfg, dict) else {}
+    api_key = (ds.get("api_key") or "").strip()
+    if not api_key:
+        return None
+    return {
+        "base_url": (ds.get("base_url") or "https://api.deepseek.com/v1").strip(),
+        "api_key": api_key,
+        "model": (ds.get("model") or "deepseek-chat").strip(),
+    }
+
+
+def _extract_json(text: str) -> dict:
+    """从模型输出里抠出 JSON 对象，兼容围栏 / 前后废话 / 行尾多余逗号。"""
+    s = (text or "").strip()
+    if not s:
+        raise ValueError("模型没有返回任何内容")
+    fence = re.search(r"```(?:json)?\s*(.+?)\s*```", s, re.S)
+    if fence:
+        s = fence.group(1).strip()
+    try:
+        obj = json.loads(s)
+        if isinstance(obj, dict):
+            return obj
+    except json.JSONDecodeError:
+        pass
+    start, end = s.find("{"), s.rfind("}")
+    if start >= 0 and end > start:
+        chunk = s[start : end + 1]
+        for candidate in (chunk, re.sub(r",(\s*[}\]])", r"\1", chunk)):
+            try:
+                obj = json.loads(candidate)
+                if isinstance(obj, dict):
+                    return obj
+            except json.JSONDecodeError:
+                continue
+    raise ValueError("模型返回无法解析为 JSON")
+
+
+def _generate_llm(
     cfg: dict,
-    hotspots: list[dict] | None = None,
-    data_insight: str | None = None,
-    data_suggestions: list[dict] | None = None,
-    auto_data: bool = True,
+    hotspots: list[dict],
+    data_insight: str | None,
+    data_suggestions: list[dict] | None,
+) -> list[dict] | None:
+    """调用 LLM 产出 5~8 个具体选题；任何失败返回 None（调用方回退模板）。"""
+    dsc = _deepseek_cfg(cfg)
+    if dsc is None:
+        return None
+    try:
+        import requests  # 懒加载，与 dissect / hotspot / vision 保持一致
+
+        pos = (cfg.get("positioning") or "").strip() or (cfg.get("account_name") or "你的账号")
+        default_style = (
+            (cfg.get("style") or "").strip() or "真实、有用、可跟；第一人称，像跟朋友聊天"
+        )
+
+        system = (
+            load_topic()
+            .replace("{positioning}", pos)
+            .replace("{default_style}", default_style)
+        )
+
+        user_parts: list[str] = []
+        if hotspots:
+            hs = "\n".join(
+                f"- 《{h.get('title', '')}》(来源:{h.get('source') or '未知来源'})"
+                for h in hotspots
+            )
+            user_parts.append("【热点素材】\n" + hs)
+        if data_insight:
+            user_parts.append("【数据洞察】" + data_insight)
+        if data_suggestions:
+            ds = "\n".join(
+                f"- {s.get('name', '')}：{s.get('evidence', '')}".rstrip("：")
+                for s in data_suggestions
+            )
+            user_parts.append("【数据选题建议】\n" + ds)
+        user_parts.append("请基于以上素材产出选题，严格按系统提示的 JSON 格式返回。")
+        user = "\n\n".join(user_parts)
+
+        payload = {
+            "model": dsc["model"],
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "temperature": 0.9,
+            "max_tokens": 2000,
+            "stream": False,
+            "response_format": {"type": "json_object"},
+        }
+        r = llm_call(
+            base_url=dsc["base_url"],
+            api_key=dsc["api_key"],
+            module="topic",
+            payload=payload,
+            timeout=120,
+        )
+        if r.status_code >= 400:
+            return None
+        data = r.json()
+        text = (((data.get("choices") or [{}])[0].get("message") or {}).get("content")) or ""
+        obj = _extract_json(text)
+        raw = obj.get("topics") or []
+        out: list[dict] = []
+        for it in raw:
+            if not isinstance(it, dict):
+                continue
+            t = (it.get("topic") or "").strip()
+            # 过滤空泛的「方向 / 篇」类表述，只留具体标题
+            if not t or len(t) < 6 or t.endswith("篇"):
+                continue
+            out.append({
+                "topic": t,
+                "angle": (it.get("angle") or "").strip(),
+                "structure": (it.get("structure") or "").strip(),
+                "background": (it.get("background") or "").strip(),
+            })
+        return out if out else None
+    except Exception:
+        return None
+
+
+def _generate_template(
+    pos: str,
+    hotspots: list[dict],
+    data_insight: str | None,
+    data_suggestions: list[dict] | None,
 ) -> list[dict]:
-    """基于账号定位/文风生成 5 个候选选题（纯模板，稳定无外部依赖）。
-
-    hotspots / data_insight / data_suggestions 均为可选。
-    前端没传数据洞察时，会自动读一次历史数据补上（auto_data=False 可关掉）。
-    """
-    pos = (cfg.get("positioning") or "").strip()
-    theme_word = pos[:18] if pos else (cfg.get("account_name") or "你的账号")
-    hotspots = [h for h in (hotspots or []) if h.get("title")]
-
-    if auto_data and not data_insight:
-        auto_ins, auto_sugg = _auto_context()
-        data_insight = data_insight or auto_ins
-        data_suggestions = data_suggestions or auto_sugg
-
+    """纯模板兜底：无外部依赖、稳定，LLM 不可用或返回不达标时启用。"""
+    theme_word = pos[:18] if pos else "你的账号"
     topics: list[dict] = []
     for i, (fa, fd) in enumerate(_ANGLES):
         item = {
@@ -274,3 +389,29 @@ def generate(
             "background": s.get("evidence", ""),
         })
     return topics
+
+
+def generate(
+    cfg: dict,
+    hotspots: list[dict] | None = None,
+    data_insight: str | None = None,
+    data_suggestions: list[dict] | None = None,
+    auto_data: bool = True,
+) -> list[dict]:
+    """生成 5~8 个候选选题。
+
+    优先调用 LLM 产出「具体、能直接当文章标题的选题」；LLM 不可用或返回不达标时，
+    回退到纯模板逻辑（无外部依赖、稳定）。
+    """
+    pos = (cfg.get("positioning") or "").strip()
+    hotspots = [h for h in (hotspots or []) if h.get("title")]
+
+    if auto_data and not data_insight:
+        auto_ins, auto_sugg = _auto_context()
+        data_insight = data_insight or auto_ins
+        data_suggestions = data_suggestions or auto_sugg
+
+    llm_topics = _generate_llm(cfg, hotspots, data_insight, data_suggestions)
+    if llm_topics:
+        return llm_topics
+    return _generate_template(pos, hotspots, data_insight, data_suggestions)

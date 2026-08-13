@@ -99,6 +99,15 @@ def load_hotspot() -> str:
     return _read(os.path.join(_PROMPTS_DIR, "hotspot", "system.md"))
 
 
+def load_topic() -> str:
+    """返回选题生成系统提示词（含 {positioning} / {default_style} 占位符）。
+
+    调用方用 str.replace 渲染；提示词内已写明 JSON 输出 schema，要求模型产出
+    具体、能直接当公众号文章标题的「选题」而非空泛的角度方向。
+    """
+    return _read(os.path.join(_PROMPTS_DIR, "topic", "system.md"))
+
+
 def load_quality_styles() -> dict:
     """返回 {"QUALITY_SPEC": ..., "QUALITY_SELF_CHECK": ...}。"""
     with open(os.path.join(_PROMPTS_DIR, "quality", "styles.json"), encoding="utf-8") as f:

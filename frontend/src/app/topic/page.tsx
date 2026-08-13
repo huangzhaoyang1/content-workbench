@@ -1045,7 +1045,14 @@ export default function TopicPage() {
             >
               <CardHeader className="pb-2">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <CardTitle className="text-base">{t.topic}</CardTitle>
+                  <div className="min-w-0">
+                    <div className="mb-1 flex items-center gap-2">
+                      <Badge variant="default" className="shrink-0 text-[10px]">选题</Badge>
+                    </div>
+                    <CardTitle className="text-lg font-semibold leading-snug">
+                      {t.topic}
+                    </CardTitle>
+                  </div>
                   <div className="flex shrink-0 gap-1.5">
                     <Button
                       size="sm"
@@ -1071,7 +1078,10 @@ export default function TopicPage() {
                     </Button>
                   </div>
                 </div>
-                <CardDescription>{t.angle}</CardDescription>
+                <CardDescription className="mt-1 text-[13px]">
+                  <span className="text-muted-foreground">切入角度：</span>
+                  {t.angle}
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2 text-sm">
                 <div>
