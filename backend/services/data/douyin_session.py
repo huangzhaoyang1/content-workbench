@@ -32,8 +32,10 @@ log = logging.getLogger("workbench.douyin_session")
 
 PROFILE_DIR = DATA_DIR / "douyin_profile"
 
-# 登录态 cookie 的标志字段：只要命中其中任一个，就认为会话有效。
-_LOGIN_MARKERS = ("sessionid", "sid_tt", "passport_csrf_token", "uid_tt", "odin_tt")
+# 登录态 cookie 的标志字段：只认「登录后才会下发」的字段。
+# 注意：passport_csrf_token / sid_tt 匿名访客也会拿到（CSRF 令牌 / 会话追踪），
+# 不能单独作为登录依据——否则浏览器一打开、拿到匿名 cookie 就误报「登录成功」。
+_LOGIN_MARKERS = ("sessionid", "uid_tt", "odin_tt")
 # 只把 douyin 系域名下的 cookie 写进 Netscape 文件，避免把别的站 cookie 漏给 yt-dlp。
 _DOUDOUYIN_HOSTS = ("douyin.com", "iesdouyin.com", "tiktok.com", "bytedance.com")
 
@@ -116,6 +118,35 @@ def _write_netscape(cookies: list[dict]) -> str:
     return p
 
 
+def _markers_from_netscape(path: str) -> list[str]:
+    """从缓存的 Netscape cookie 文件里提取命中的登录标记（供 session_status 兜底用）。"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.readlines()
+    except Exception:
+        return []
+    names: set[str] = set()
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) < 7:
+            continue
+        names.add(parts[5])
+    return [m for m in _LOGIN_MARKERS if m in names]
+
+
+def _count_from_netscape(path: str) -> int:
+    """统计 Netscape cookie 文件里有效 cookie 条数。"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.readlines()
+    except Exception:
+        return 0
+    return sum(1 for line in lines if line.strip() and not line.startswith("#"))
+
+
 def get_cookie_netscape_file(force: bool = False) -> str | None:
     """返回可用于 yt-dlp cookiefile 的 Netscape 文件路径；无有效会话返回 None。
 
@@ -139,6 +170,19 @@ def get_cookie_netscape_file(force: bool = False) -> str | None:
 
 def session_status() -> dict:
     """给前端展示当前扫码登录状态。"""
+    # 优先看内存缓存：Chromium 落盘 SQLite 有延迟，先靠缓存避免误报「未登录」。
+    # 也顺带兜住「ensure_session 刚拿到 cookie 但磁盘还没写」的窗口期。
+    cached = _cache.get("path")
+    if cached and os.path.isfile(cached) and (time.time() - _cache["ts"]) < _cache["ttl"]:
+        markers = _markers_from_netscape(cached)
+        if markers:
+            return {
+                "exists": True,
+                "logged_in": True,
+                "cookie_count": _count_from_netscape(cached),
+                "markers": markers,
+                "note": "会话有效（来自内存缓存）。",
+            }
     if not _profile_has_cookies_db():
         return {
             "exists": False,
@@ -194,12 +238,26 @@ def ensure_session(timeout: int = 300) -> dict:
             try:
                 page = ctx.new_page()
                 page.goto("https://www.douyin.com/", timeout=30000)
+                # 打开瞬间若已是登录态（profile 里已有真会话，无需扫码）→ 直接复用，
+                # 否则匿名访客的 passport_csrf_token / sid_tt 会被误判成「登录成功」。
+                cookies0 = ctx.cookies()
+                if _has_login_marker(cookies0):
+                    path = _write_netscape(cookies0)
+                    _cache["path"] = path
+                    _cache["ts"] = time.time()
+                    return {"ok": True, "already": True}
+                # 不是登录态 → 轮询等待用户手机扫码
                 deadline = time.time() + timeout
                 logged_in = False
                 while time.time() < deadline:
                     cookies = ctx.cookies()
                     if _has_login_marker(cookies):
                         logged_in = True
+                        # 立即把内存里的 cookie 落盘成 Netscape 并暖缓存，
+                        # 不依赖 Chromium 异步落盘 SQLite 的时机（否则徽标会短暂误报未登录）
+                        path = _write_netscape(cookies)
+                        _cache["path"] = path
+                        _cache["ts"] = time.time()
                         break
                     time.sleep(2)
             finally:
@@ -210,6 +268,4 @@ def ensure_session(timeout: int = 300) -> dict:
     if not logged_in:
         return {"ok": False, "error": f"等待扫码登录超时（{timeout}s），请重试。"}
 
-    # 登录成功：清掉缓存，下次读取会重新导出最新 cookie
-    _cache["path"] = None
     return {"ok": True, "already": False}
