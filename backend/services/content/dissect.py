@@ -511,20 +511,33 @@ def transcribe_video_url(url: str) -> dict:
     这是三层兜底里的第 2 层（第 1 层是页面文本，第 3 层是手动粘贴）。
     实际转写由 services/data/transcribe.py 完成（yt-dlp + whisper，CPU 模式）。
 
-    返回 {ok, text, duration_sec, engine, model, error?}。
+    返回 {ok, text, duration_sec, engine, model, error?, error_key?}。
     失败 / 超时都返回 ok=False + 中文原因，前端据此引导用户手动粘贴。
     """
     from ..data.transcribe import transcribe_video
 
-    if not (url or "").strip():
+    # 用户可能把整段抖音分享口令粘进来（含标题/话题/"复制此链接..."等噪声），
+    # 先用 extract_url 抠出真正的 URL；找不到再报错，避免把整坨塞给 yt-dlp。
+    cleaned = extract_url((url or "").strip())
+    if not cleaned:
         return {
             "ok": False,
             "text": "",
             "duration_sec": None,
             "engine": "whisper",
-            "error": "缺少抖音链接",
+            "error": "没识别出链接。请粘贴完整的抖音分享链接（含 http），或改用「手动粘贴」。",
+            "error_key": "invalid_url",
         }
-    return transcribe_video(url)
+    if "douyin.com" not in cleaned and "iesdouyin.com" not in cleaned:
+        return {
+            "ok": False,
+            "text": "",
+            "duration_sec": None,
+            "engine": "whisper",
+            "error": f"这不像抖音链接：{cleaned}。目前只支持抖音，其他平台请用「手动粘贴」。",
+            "error_key": "invalid_url",
+        }
+    return transcribe_video(cleaned)
 
 
 # ---------------------------------------------------------------------------

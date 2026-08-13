@@ -63,6 +63,16 @@ function fmtDuration(sec: number | null | undefined): string {
   return m > 0 ? `${m}分${String(s).padStart(2, "0")}秒` : `${s}秒`;
 }
 
+/** 从抖音分享口令里抠出真正的 URL。
+ *  抖音 App 复制出来的「分享口令」会塞一堆标题/话题/"复制此链接..."提示，
+ *  我们要替用户把那部分去掉。和后端 extract_url() 行为一致：
+ *  链接由 https?:// 开头，遇到空白/中文字符/中文标点就停。 */
+const SHARE_URL_RE = /https?:\/\/[^\s\u4e00-\u9fff，。！？、）)]+/;
+function extractShareUrl(text: string): string {
+  const m = text.match(SHARE_URL_RE);
+  return m ? m[0] : "";
+}
+
 /** 结构化字段的一个小格子 */
 function Field({
   icon: Icon,
@@ -115,6 +125,9 @@ export function InputSection({
   const [transcribing, setTranscribing] = React.useState(false);
   const [transcribeError, setTranscribeError] = React.useState<string | null>(null);
   const [transcribed, setTranscribed] = React.useState(false);
+
+  // 粘贴时若检测到分享口令里夹着链接，自动抽出 + 闪一下提示
+  const [extracted, setExtracted] = React.useState(false);
 
   const handleFetch = async () => {
     if (!onFetch || !url.trim()) return;
@@ -233,12 +246,27 @@ export function InputSection({
               <div className="flex gap-2">
                 <Input
                   id="dy-url"
-                  placeholder="粘贴抖音分享链接，例如 https://v.douyin.com/xxxxx/ （或带链接的分享口令）"
+                  placeholder="粘贴抖音分享文本或链接，会自动识别 URL（例如 https://v.douyin.com/xxxxx/）"
                   value={url}
                   error={!!urlError}
                   onChange={(e) => {
                     setUrl(e.target.value);
                     if (fetched) resetFetch();
+                  }}
+                  onPaste={(e) => {
+                    // 用户从抖音 App 复制粘贴通常是「标题 + 链接 + 复制提示」一整段。
+                    // 含中文的「分享口令」里识别出 URL 就替换成纯 URL，免得自己抠。
+                    const text = e.clipboardData.getData("text") || "";
+                    if (/[\u4e00-\u9fff]/.test(text)) {
+                      const m = extractShareUrl(text);
+                      if (m && m !== text) {
+                        e.preventDefault();
+                        setUrl(m);
+                        setExtracted(true);
+                        window.setTimeout(() => setExtracted(false), 2500);
+                        if (fetched) resetFetch();
+                      }
+                    }
                   }}
                   disabled={busy}
                 />
@@ -259,7 +287,13 @@ export function InputSection({
                 </Button>
               </div>
               {urlError && <p className="text-xs text-destructive">{urlError}</p>}
-              {!fetched && !urlError && (
+              {extracted && (
+                <p className="flex items-center gap-1 text-xs text-emerald-600">
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  已从分享文本中自动提取链接
+                </p>
+              )}
+              {!fetched && !urlError && !extracted && (
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   先抓取、后拆解：抓完会把标题、口播文案、描述、发布时间、点赞/评论/收藏数
                   列出来给你确认，文案可以直接改，确认没问题再开始拆解。
