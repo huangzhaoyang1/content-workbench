@@ -35,6 +35,37 @@ def get_config() -> dict:
     return douyin_sync.get_config()
 
 
+class LoginReq(BaseModel):
+    timeout: int = Field(300, description="等待扫码登录的最长秒数（默认 300）")
+
+
+@router.post("/douyin-sync/login")
+def login(body: LoginReq) -> dict:
+    """弹出真实浏览器窗口，让用户手机扫码登录抖音；登录成功自动关窗。
+
+    必须在**用户本机**执行（需要显示器弹窗）。无头/沙箱环境会直接返回失败，
+    属预期。前端在「等待扫码」状态里阻塞等待本接口返回。
+    """
+    try:
+        from ..services.data.douyin_session import ensure_session
+
+        return ensure_session(timeout=max(30, min(body.timeout, 600)))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"登录失败：{str(e)[:200]}")
+
+
+@router.get("/douyin-sync/session-status")
+def session_status() -> dict:
+    """当前扫码登录状态（是否已登录、cookie 数量、命中哪些登录标记）。"""
+    try:
+        from ..services.data.douyin_session import session_status as _status
+
+        return _status()
+    except Exception as e:  # noqa: BLE001
+        return {"exists": False, "logged_in": False, "cookie_count": 0, "markers": [],
+                "error": str(e)[:160]}
+
+
 class RunReq(BaseModel):
     urls: list[str] = Field(default_factory=list, description="手动粘贴的抖音链接，留空则跑配置里的来源")
 

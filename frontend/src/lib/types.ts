@@ -724,12 +724,17 @@ export interface DissectSource {
 /** POST /api/douyin-dissect/fetch —— 只抓取不拆解 */
 export interface DissectFetchResult {
   text: string;
-  source: DissectSource;
+  /** 抓取成功才有结构化信息；反爬/验证页拦截时返回 null（同时 needs_transcribe=true） */
+  source?: DissectSource | null;
   hints: string[];
   note: string;
   complete: boolean;
   /** 视频时长（秒），用来决定是否要触发自动转写。抓不到时为 null。 */
   duration_sec?: number | null;
+  /** 抓取被反爬/验证页拦截：前端应自动触发「视频转写」兜底 */
+  needs_transcribe?: boolean;
+  /** 拦截时的原始错误信息（兜底失败后才展示给用户） */
+  transcribe_error?: string;
 }
 
 /** POST /api/douyin-dissect/transcribe —— 视频音频 → 文字（Whisper） */

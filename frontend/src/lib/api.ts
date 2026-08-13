@@ -622,6 +622,22 @@ export const api = {
   /** 首屏一次性数据：配置 + 统计 + 下次执行时间 */
   douyinSyncState: () => request<DouyinSyncState>("/api/douyin-sync/state"),
   douyinSyncConfig: () => request<DouyinSyncConfig>("/api/douyin-sync/config"),
+  /** 扫码登录状态（是否已登录 / cookie 数 / 命中的登录标记） */
+  douyinSyncSessionStatus: () =>
+    request<{
+      exists: boolean;
+      logged_in: boolean;
+      cookie_count: number;
+      markers: string[];
+      note?: string;
+      error?: string;
+    }>("/api/douyin-sync/session-status"),
+  /** 弹出真实浏览器窗口让用户手机扫码登录（阻塞到扫码成功或超时） */
+  douyinSyncLogin: (timeout = 300) =>
+    request<{ ok: boolean; already?: boolean; error?: string }>(
+      "/api/douyin-sync/login",
+      { method: "POST", body: JSON.stringify({ timeout }) }
+    ),
   /** 保存配置（来源 / 频率 / cookie / 筛选条件） */
   douyinSyncSaveConfig: (config: Partial<DouyinSyncConfig>) =>
     request<DouyinSyncConfig>("/api/douyin-sync/config", {

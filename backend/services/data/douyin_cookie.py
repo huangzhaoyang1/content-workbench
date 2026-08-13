@@ -142,7 +142,28 @@ def resolve_douyin_cookie() -> dict[str, Any]:
         mode == "cookiefile" → opts["cookiefile"] = info["cookiefile"]
 
     想看「字符串长度」做日志时用 length，避免明文泄露。
+
+    cookie 来源优先级（自动会话优先，彻底免去手动复制）：
+        0. douyin_session 持久登录（Playwright 扫码一次，自动续期）→ cookiefile
+        1. douyin_sync.json 里 UI 粘的 Cookie 头字符串              → header
+        2. 环境变量 ASR_DOUYIN_COOKIES 指向的 Netscape 文件（.bat）  → cookiefile
     """
+    # 优先级 0：Playwright 持久登录 session（扫码一次，自动续期，告别手动复制）
+    try:
+        from .douyin_session import get_cookie_netscape_file
+
+        sess_path = get_cookie_netscape_file()
+        if sess_path:
+            log.info("[douyin_cookie] 使用 Playwright 持久登录会话（%s）", sess_path)
+            return {
+                "mode": "cookiefile",
+                "cookiefile": sess_path,
+                "name": "douyin_session",
+                "length": 0,
+            }
+    except Exception as e:  # noqa: BLE001
+        log.debug("[douyin_cookie] session cookie 暂不可用：%s", e)
+
     # 优先级 1：UI 粘的 Cookie 头字符串
     sync_ck = _read_douyin_sync_cookie()
     if sync_ck:

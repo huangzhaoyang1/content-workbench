@@ -17,6 +17,7 @@ import {
   Library,
   ChevronDown,
   ChevronUp,
+  QrCode,
 } from "lucide-react";
 import { PageShell, PageHeader } from "@/components/layout/PageShell";
 import { Button } from "@/components/ui/button";
@@ -202,6 +203,18 @@ export default function DouyinSyncPage() {
   const [savingCfg, setSavingCfg] = React.useState(false);
   const [dirtyCfg, setDirtyCfg] = React.useState(false);
 
+  // 抖音扫码持久登录（Playwright）状态
+  const [sessionStatus, setSessionStatus] = React.useState<{
+    exists: boolean;
+    logged_in: boolean;
+    cookie_count: number;
+    markers: string[];
+    note?: string;
+    error?: string;
+  } | null>(null);
+  const [loggingIn, setLoggingIn] = React.useState(false);
+  const [loginError, setLoginError] = React.useState<string | null>(null);
+
   // 立即同步（手动）
   const [manualUrls, setManualUrls] = React.useState("");
   const [running, setRunning] = React.useState(false);
@@ -290,11 +303,44 @@ export default function DouyinSyncPage() {
     }
   }, []);
 
+  // 读取扫码登录状态（是否已登录 / cookie 数 / 命中哪些登录标记）
+  const refreshSessionStatus = React.useCallback(async () => {
+    try {
+      const s = await api.douyinSyncSessionStatus();
+      setSessionStatus(s);
+    } catch {
+      /* 后端没装 playwright 时会失败，忽略（手动 cookie 仍可用） */
+    }
+  }, []);
+
+  // 触发扫码登录：弹出真实浏览器窗口等用户手机扫码（阻塞到扫码或超时）
+  const handleLogin = async () => {
+    setLoggingIn(true);
+    setLoginError(null);
+    try {
+      const r = await api.douyinSyncLogin(300);
+      if (r.ok) {
+        toast(r.already ? "已是登录态，无需重扫" : "扫码登录成功，会话已保存（自动续期）", "success");
+        await refreshSessionStatus();
+      } else {
+        setLoginError(r.error || "登录失败");
+        toast(r.error || "登录失败，请重试", "error");
+      }
+    } catch (e) {
+      const msg = friendlyMessage(e, "登录请求失败（需在本机运行后端）");
+      setLoginError(msg);
+      toast(msg, "error");
+    } finally {
+      setLoggingIn(false);
+    }
+  };
+
   React.useEffect(() => {
     void refreshState();
     void refreshRecords();
     void refreshRuns();
-  }, [refreshState, refreshRecords, refreshRuns]);
+    void refreshSessionStatus();
+  }, [refreshState, refreshRecords, refreshRuns, refreshSessionStatus]);
 
   React.useEffect(() => {
     if (tab === "library") void loadDyTopics();
@@ -605,8 +651,8 @@ export default function DouyinSyncPage() {
                     <div>
                       <CardTitle>同步设置</CardTitle>
                       <CardDescription>
-                        抖音网页端反爬很严，收藏夹 / 主页一般要登录。粘贴你自己的 Cookie 成功率更高；
-                        也可以只用「手动粘贴链接」。
+                        抖音网页端反爬很严，收藏夹 / 主页一般要登录。推荐用上方「抖音登录（扫码）」
+                        一次扫码、自动续期；不想扫码也能用「手动粘贴 Cookie」或只用「手动粘贴链接」。
                       </CardDescription>
                     </div>
                     <label className="flex items-center gap-2 text-sm">
@@ -749,13 +795,75 @@ export default function DouyinSyncPage() {
                     </div>
                   </div>
 
-                  {/* Cookie */}
+                  {/* 抖音登录（扫码，主路径）：扫码一次，会话持久化 + 自动续期，告别手动复制 */}
+                  <div className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <Label className="text-sm font-medium">
+                        抖音登录
+                        <span className="ml-2 text-xs font-normal text-muted-foreground">
+                          推荐：扫码一次，会话自动续期，再也不用手动复制 Cookie
+                        </span>
+                      </Label>
+                      {sessionStatus?.logged_in ? (
+                        <Badge variant="success">
+                          <CheckCircle2 className="mr-1 h-3 w-3" /> 已登录（自动续期）
+                        </Badge>
+                      ) : sessionStatus?.exists ? (
+                        <Badge variant="warning">
+                          <XCircle className="mr-1 h-3 w-3" /> 会话已过期
+                        </Badge>
+                      ) : (
+                        <Badge variant="muted">未登录</Badge>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {loggingIn ? (
+                        <Button size="sm" disabled className="gap-1.5">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          正在等待扫码…（请在弹出的浏览器窗口用手机扫码）
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          className="gap-1.5"
+                          onClick={handleLogin}
+                          disabled={savingCfg}
+                        >
+                          <QrCode className="h-3.5 w-3.5" />
+                          {sessionStatus?.logged_in ? "重新登录" : "抖音登录（扫码）"}
+                        </Button>
+                      )}
+                      <p className="text-xs text-muted-foreground">
+                        点一下会弹出抖音网页，手机扫码登录后窗口自动关闭。
+                      </p>
+                    </div>
+
+                    {loginError && (
+                      <p className="text-xs text-destructive">
+                        登录失败：{loginError}（需在「本机」运行后端才能弹窗扫码）
+                      </p>
+                    )}
+                    {sessionStatus?.logged_in && (
+                      <p className="text-xs text-muted-foreground">
+                        已读取到 {sessionStatus.cookie_count} 条 cookie，命中登录标记：
+                        {sessionStatus.markers.join("、") || "（无）"}。会话过期时点「重新登录」即可续期。
+                      </p>
+                    )}
+                    {!sessionStatus && (
+                      <p className="text-xs text-muted-foreground">
+                        后端未启用 Playwright 扫码登录（可选）；不影响下面「手动粘贴 Cookie」方式。
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Cookie（手动粘贴，备选路径） */}
                   <div className="space-y-2 rounded-lg border border-border p-3">
                     <div className="flex items-center justify-between gap-2">
                       <Label className="text-sm font-medium">
-                        抖音登录 Cookie
+                        手动粘贴 Cookie
                         <span className="ml-2 text-xs font-normal text-muted-foreground">
-                          （选填，不配也能用，配了抓取/转写成功率大幅提升）
+                          （备选）扫码登录用不了时，才用这个：复制浏览器 Cookie 整段粘贴
                         </span>
                       </Label>
                       {config?.cookie_set ? (

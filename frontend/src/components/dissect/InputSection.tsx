@@ -167,6 +167,12 @@ export function InputSection({
       const res = await onFetch(url.trim());
       setFetched(res);
       setDraft(res.text ?? "");
+      // 抓取被反爬/验证页拦截：后端返回 needs_transcribe，这里直接自动触发
+      // 「视频转写」兜底（约 5–30 分钟）。成功即用完整口播稿，失败才引导手动粘贴。
+      if (res.needs_transcribe) {
+        void runTranscribe(url.trim());
+        return;
+      }
       // 时长感知的「是否要自动转写」判定，和后端 dissect._should_trigger_transcribe 行为一致：
       //   - 中文口播按 3.5 字/秒估算应有字数；
       //   - 抓到的字数 < max(300, expected * 0.2) 时触发 Whisper 转写。
@@ -230,11 +236,16 @@ export function InputSection({
         void handleFetch();
         return;
       }
-      // 若这一步的文案来自视频转写，把素材来源标记为 transcribe，
-      // 后端 analyze 会透传到结果徽章「视频转写」。
+      // 若这一步的文案来自视频转写（页面文本太短自动转写、或反爬拦截兜底转写），
+      // 把素材来源标记为 transcribe，后端 analyze 会透传到结果徽章「视频转写」。
       const meta =
-        fetched.source && transcribed
-          ? { ...fetched.source, origin: "transcribe" as const }
+        transcribed
+          ? {
+              origin: "transcribe" as const,
+              url: url.trim(),
+              note: "",
+              complete: true,
+            }
           : (fetched.source ?? null);
       onSubmit({
         url: url.trim(),
@@ -504,6 +515,94 @@ export function InputSection({
                     onChange={(e) => setDraft(e.target.value)}
                     disabled={busy}
                     placeholder="抓到的文案会填在这里。如果只抓到简介，建议打开抖音开字幕，把完整口播稿粘进来覆盖。"
+                    className="min-h-[180px] resize-y bg-card font-mono text-[13px] leading-relaxed"
+                  />
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>至少 30 字才能拆解；200 字以上质量明显更好。</span>
+                    <span
+                      className={cn(
+                        draft.length > 0 && draft.length < 30 && "text-amber-400",
+                        draft.length >= 200 && "text-emerald-400"
+                      )}
+                    >
+                      {draft.length} 字
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ---------- 抓取被反爬拦截 → 自动转写兜底 ---------- */}
+            {fetched?.needs_transcribe && (
+              <div className="space-y-3 rounded-xl border border-primary/25 bg-primary/5 p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="warning">抓取被拦截</Badge>
+                  <span className="text-[11px] text-muted-foreground">
+                    抖音反爬拦截了页面抓取，已自动改用「视频转写」拿完整口播稿
+                  </span>
+                </div>
+
+                {/* 自动转写进度 */}
+                {transcribing && (
+                  <div className="flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 p-3 text-xs leading-relaxed">
+                    <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary" />
+                    <div>
+                      正在尝试自动转写视频内容（约 5–30 分钟）…
+                      <div className="mt-0.5 text-muted-foreground">
+                        先把视频音频拉下来再用 Whisper 转成文字，完成后会自动填进口播文案框；你也可以直接手动粘贴。
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 转写失败引导 */}
+                {!transcribing && transcribeError && (
+                  <Alert variant="warning">
+                    <AlertDescription>
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                        <div className="space-y-1 text-xs leading-relaxed">
+                          <div>视频转写也没成功：{transcribeError}</div>
+                          {transcribeErrorKey === "need_login" ? (
+                            <div className="space-y-2">
+                              <div>
+                                自动转写需要登录态。去「抖音同步」页扫码登录或粘贴 Cookie，保存后回来再试。
+                              </div>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => router.push("/douyin-sync")}
+                                className="mt-1 h-7 gap-1.5 text-xs"
+                              >
+                                <Cookie className="h-3.5 w-3.5" />
+                                去登录 / 配 Cookie
+                              </Button>
+                            </div>
+                          ) : (
+                            <div>建议打开抖音 App 开字幕，把完整口播稿复制粘贴到下面的框里再拆解。</div>
+                          )}
+                        </div>
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {/* 可编辑文案（转写完成后自动填入；也可手动粘贴覆盖） */}
+                <div className="space-y-2">
+                  <Label htmlFor="dy-draft-antibot" required>
+                    口播文案（可直接编辑，确认后再拆解）
+                    {transcribed && (
+                      <Badge variant="success" className="ml-2">
+                        视频转写
+                      </Badge>
+                    )}
+                  </Label>
+                  <Textarea
+                    id="dy-draft-antibot"
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    disabled={busy}
+                    placeholder="自动转写完成后会填到这里；也可手动粘贴抖音字幕/口播稿覆盖。"
                     className="min-h-[180px] resize-y bg-card font-mono text-[13px] leading-relaxed"
                   />
                   <div className="flex items-center justify-between text-xs text-muted-foreground">

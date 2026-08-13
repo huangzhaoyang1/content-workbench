@@ -51,10 +51,16 @@ TYPE_TAGS = ("反常识", "痛点", "干货", "故事", "经验")
 class DissectError(RuntimeError):
     """拆解链路的业务异常，由路由层或统一异常处理器转成 4xx 友好提示。"""
 
-    def __init__(self, message: str, status_code: int = 400) -> None:
+    def __init__(
+        self, message: str, status_code: int = 400, error_key: str | None = None
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.status_code = status_code
+        # error_key 用来让前端/上层做「分类引导」：
+        #   grab_antibot  → 抓到验证页/空页面/被反爬拦截，应自动转写兜底
+        #   invalid_url   → 链接本身非法（不要尝试转写）
+        self.error_key = error_key
 
 
 # ---------------------------------------------------------------------------
@@ -709,9 +715,15 @@ def fetch_douyin(raw_url: str) -> dict:
 
     url = extract_url(raw_url)
     if not url:
-        raise DissectError("没识别出链接。请粘贴完整的抖音分享链接（含 http），或改用「手动粘贴」。")
+        raise DissectError(
+            "没识别出链接。请粘贴完整的抖音分享链接（含 http），或改用「手动粘贴」。",
+            error_key="invalid_url",
+        )
     if "douyin.com" not in url and "iesdouyin.com" not in url:
-        raise DissectError(f"这不像抖音链接：{url}。目前只支持抖音，其他平台请用「手动粘贴」。")
+        raise DissectError(
+            f"这不像抖音链接：{url}。目前只支持抖音，其他平台请用「手动粘贴」。",
+            error_key="invalid_url",
+        )
 
     # ============ 路径 1: yt-dlp ============
     ytdlp_meta = _ytdlp_extract_douyin(url)
@@ -796,7 +808,8 @@ def fetch_douyin(raw_url: str) -> dict:
                 else:
                     extra = f"（{yt_dlp_err}）"
             raise DissectError(
-                f"没能从这个链接里读到视频信息。{extra or _MANUAL_HINT}"
+                f"没能从这个链接里读到视频信息。{extra or _MANUAL_HINT}",
+                error_key="grab_antibot",
             )
 
     # ---------- 组装结构化结果（item 优先，regex 兜底） ----------
@@ -841,7 +854,8 @@ def fetch_douyin(raw_url: str) -> dict:
 
     if not (text or title):
         raise DissectError(
-            f"没能从这个链接里读到任何视频信息（抖音返回的是验证页或空页面）。{_MANUAL_HINT}"
+            f"没能从这个链接里读到任何视频信息（抖音返回的是验证页或空页面）。{_MANUAL_HINT}",
+            error_key="grab_antibot",
         )
 
     missing = [
@@ -1288,10 +1302,38 @@ def _merge_meta(source: dict[str, Any], meta: Any) -> dict[str, Any]:
 
 
 def fetch_preview(url: str) -> dict:
-    """只抓取不拆解：给前端做「抓取结果预览 / 编辑」用。"""
+    """只抓取不拆解：给前端做「抓取结果预览 / 编辑」用。
+
+    抓取被反爬拦截（验证页/空页面）时，不直接报失败，而是返回一个
+    ``needs_transcribe=True`` 的信号，由前端自动触发「视频转写」兜底
+    （避免 /fetch 接口被 40 分钟的转写任务阻塞）。
+    """
     if not (url or "").strip():
         raise DissectError("请先填一个抖音分享链接。")
-    fetched = fetch_douyin(url)
+    try:
+        fetched = fetch_douyin(url)
+    except DissectError as e:
+        key = getattr(e, "error_key", None)
+        # 链接本身非法（没识别出 / 不是抖音链接）：转写也处理不了，直接报错，不兜底。
+        if key == "invalid_url":
+            raise
+        # 其它抓取失败（反爬验证页 / 空页面 / 网络被拦 / 超时 等）：
+        # 自动转写兜底由前端触发（不阻塞 /fetch 接口），转写成功即用完整口播稿，
+        # 失败才引导手动粘贴。
+        return {
+            "text": "",
+            "source": None,
+            "hints": [
+                "抓取失败（抖音反爬拦截或网络不通）。已自动改用「视频转写」"
+                "把视频音频转成完整口播稿（约 5–30 分钟）。"
+            ],
+            "note": "",
+            "complete": False,
+            "duration_sec": None,
+            "video_id": "",
+            "needs_transcribe": True,
+            "transcribe_error": str(e),
+        }
     source = source_from_fetch(fetched)
     text = fetched.get("text") or ""
     duration_sec = fetched.get("duration_sec")
