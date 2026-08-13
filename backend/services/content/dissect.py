@@ -478,6 +478,184 @@ def _http_get(url: str, *, mobile: bool = True, timeout: int = 15):
     )
 
 
+def _ytdlp_extract_douyin(raw_url: str) -> dict | None:
+    """首选：让 yt-dlp 解析抖音视频页元数据。
+
+    为什么用 yt-dlp：现代抖音视频页是 SPA，HTML 拉下来只是个空 `<body>` + JS，
+    真实视频数据（标题/作者/时长/点赞/封面…）是通过 XHR + `_VIDEO_PAGE_RENDER_DATA_`
+    注入的。我们自己的 requests+_parse_embedded_json 对短链（v.douyin.com）基本
+    无解——短链会先重定向到首页或被反爬拦截，根本拿不到视频页 HTML。
+
+    yt-dlp 的内置 Douyin extractor 处理了所有这些坑：跟随短链重定向、解析 SPA
+    注入的 JSON、应用 cookie 解封登录态墙、提取标准化字段。已在沙箱用用户
+    ASR_DOUYIN_COOKIES 实测：直链 https://www.douyin.com/video/7669733815660596507
+    + cookie → 标题/作者/时长 921s/点赞 34050/封面 全部能拿到。
+
+    返回值（命中时）：
+        {
+          "video_id", "title", "desc", "author", "create_time",
+          "duration_sec", "cover", "stats": {digg, comment, share, play},
+          "strategy": "ytdlp",
+        }
+    字段抓不到的填 "" 或 None。
+
+    返回 None 的情况（不抛异常，调用方继续走 requests+regex 兜底）：
+        - ASR_DOUYIN_COOKIES 未配置（yt-dlp 对 douyin 必须带 cookie）
+        - 任何 yt-dlp 解析失败（短链失效、视频私密、反爬、网络错误等）
+    """
+    import os
+
+    cookie_path = os.environ.get("ASR_DOUYIN_COOKIES", "").strip()
+    if not cookie_path or not os.path.isfile(cookie_path):
+        log.debug("[dissect] ASR_DOUYIN_COOKIES 未配置，跳过 yt-dlp 路径")
+        return None
+
+    try:
+        import yt_dlp  # 懒加载；只有触发 yt-dlp 路径时才要
+    except Exception as e:  # noqa: BLE001
+        log.warning("[dissect] yt-dlp 未安装/不可用：%s", e)
+        return None
+
+    # 与 services/data/transcribe.py 的 _ytdl_common_opts 保持一致；
+    # 抖音需要 Referer 才能拿到视频页，否则会被反爬截到首页。
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "skip_download": True,
+        "extract_flat": False,
+        "cookiefile": cookie_path,
+        "http_headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            ),
+            "Referer": "https://www.douyin.com/",
+        },
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(raw_url, download=False)
+    except Exception as e:  # noqa: BLE001
+        # 抖音典型的几种 yt-dlp 错误：
+        #   - "[Douyin] xxx: Fresh cookies (not necessarily logged in) are needed"
+        #     → cookie 过期，用户需要重新导出
+        #   - "Unsupported URL: https://www.douyin.com/" → 短链失效/被反爬重定向到首页
+        #   - 网络层错误
+        # 这些都不在本函数抛，让调用方走兜底 + 把错误上抛给前端
+        msg = str(e)[:240]
+        log.info("[dissect] yt-dlp 解析失败：%s", msg)
+        return {"_error": msg}
+
+    if not isinstance(info, dict):
+        return None
+
+    # yt-dlp Douyin extractor 的字段映射（实测过）
+    # title=视频标题；description=完整描述/口播文案（注意：抖音网页版 description
+    # 是公开页面上的视频简介，不一定是口播完整稿）；uploader/nickname=作者昵称；
+    # uploader_id=作者 sec_uid；duration=秒；like_count=点赞；comment_count=评论；
+    # view_count=播放；upload_date='YYYYMMDD'；thumbnail=封面 URL；id=aweme_id。
+    duration = info.get("duration")
+    if isinstance(duration, (tuple, list)):
+        duration = duration[0] if duration else None
+
+    def _first_str(*keys):
+        for k in keys:
+            v = info.get(k)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+        return ""
+
+    def _int_or_none(k):
+        v = info.get(k)
+        try:
+            return int(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    return {
+        "video_id": str(info.get("id") or ""),
+        "title": _first_str("title"),
+        "desc": _first_str("description"),
+        "author": _first_str("uploader", "channel", "creator"),
+        "create_time": _fmt_upload_date(info.get("upload_date")),
+        "duration_sec": int(duration) if duration else None,
+        "cover": _first_str("thumbnail"),
+        "stats": {
+            "digg": _int_or_none("like_count"),
+            "comment": _int_or_none("comment_count"),
+            "collect": None,  # 抖音收藏 yt-dlp extractor 没有直接字段，跳过
+            "share": _int_or_none("share_count") or _int_or_none("repost_count"),
+            "play": _int_or_none("view_count"),
+        },
+        "strategy": "ytdlp",
+    }
+
+
+def _fmt_upload_date(s):
+    """yt-dlp upload_date 形如 '20240813'，转 ISO/年月日。"""
+    if not s or not isinstance(s, str) or len(s) != 8 or not s.isdigit():
+        return ""
+    return f"{s[0:4]}-{s[4:6]}-{s[6:8]}"
+
+
+def _assemble_result(*, url: str, title: str, desc: str, author: str,
+                    create_time: str, duration_sec, cover: str, stats: dict,
+                    video_id: str, strategy: str) -> dict:
+    """yt-dlp 路径命中后用它把字段映射成 fetch_douyin 的标准输出 schema。
+
+    字段语义与下方 item 装配路径完全一致（missing / complete / note / text 计算也一致），
+    只是不再依赖 _parse_embedded_json 抓到的抖音原生 dict。
+    """
+    hashtags = re.findall(r"#([^\s#]{1,20})", desc)
+    text = re.sub(r"#[^\s#]{1,20}", "", desc).strip() or title
+
+    missing = [
+        _FIELD_LABELS[k]
+        for k, v in (
+            ("title", title),
+            ("desc", desc),
+            ("author", author),
+            ("create_time", create_time),
+            ("stats", any(v is not None for v in stats.values())),
+            ("duration_sec", duration_sec),
+        )
+        if not v
+    ]
+    complete = not _is_incomplete_fetch(text, duration_sec)
+    if not complete:
+        missing.insert(0, _FIELD_LABELS["text"])
+
+    note = (
+        "已抓到视频描述。抖音网页端不提供口播字幕，如果下面的文案不是完整口播稿，"
+        "建议手动补全后再拆解，出来的文章会具体得多。"
+        if complete
+        else _INCOMPLETE_WARN.format(
+            n=len(text),
+            exp=_expected_chars(duration_sec) or len(text) * 5,
+        )
+    )
+
+    return {
+        "video_id": video_id,
+        "title": title,
+        "desc": desc,
+        "text": text,
+        "author": author,
+        "create_time": create_time,
+        "duration_sec": duration_sec,
+        "stats": stats,
+        "hashtags": hashtags[:12],
+        "cover": cover,
+        "source_url": url,
+        "complete": complete,
+        "missing": missing,
+        "note": note,
+        "strategy": strategy,
+    }
+
+
 def fetch_douyin(raw_url: str) -> dict:
     """从抖音链接尽力抓取**结构化**视频信息。
 
@@ -485,6 +663,13 @@ def fetch_douyin(raw_url: str) -> dict:
         video_id / title / desc / text / author / create_time / duration_sec
         stats{digg,comment,collect,share} / cover / source_url
         complete / missing / note / strategy
+
+    三层抓取路径：
+      1. yt-dlp（首选）：自带 Douyin extractor，对 SPA / 短链 / cookie 三连击做过全套处理
+         —— 我们实测光这一条就能拿到标题/作者/时长/点赞/封面全字段。
+      2. requests + _parse_embedded_json（兜底）：自己拼 UA/Referer/cookie 直拉 HTML，
+         找 `_VIDEO_PAGE_RENDER_DATA_` 注入的 JSON。
+      3. requests + regex（最后兜底）：用 meta description + 标题标签凑出基础字段。
 
     只有在「一个字都没抓到」时才抛 DissectError，其余情况一律返回部分结果，
     交给用户在前端补齐——这比直接失败有用得多。
@@ -497,6 +682,34 @@ def fetch_douyin(raw_url: str) -> dict:
     if "douyin.com" not in url and "iesdouyin.com" not in url:
         raise DissectError(f"这不像抖音链接：{url}。目前只支持抖音，其他平台请用「手动粘贴」。")
 
+    # ============ 路径 1: yt-dlp ============
+    ytdlp_meta = _ytdlp_extract_douyin(url)
+    if ytdlp_meta and ytdlp_meta.get("title"):
+        # yt-dlp 命中：title 必有，video_id 也必有（都拿到说明视频确存在）
+        yt_err = ytdlp_meta.pop("_error", None)
+        log.info("[dissect] yt-dlp 路径命中：title=%r, id=%s", ytdlp_meta.get("title"), ytdlp_meta.get("video_id"))
+        return _assemble_result(
+            url=url,
+            title=ytdlp_meta["title"],
+            desc=ytdlp_meta["desc"],
+            author=ytdlp_meta["author"],
+            create_time=ytdlp_meta["create_time"],
+            duration_sec=ytdlp_meta["duration_sec"],
+            cover=ytdlp_meta["cover"],
+            stats=ytdlp_meta["stats"],
+            video_id=ytdlp_meta["video_id"],
+            strategy="ytdlp",
+        )
+    elif ytdlp_meta and ytdlp_meta.get("_error"):
+        # yt-dlp 尝试过但报错（cookie 过期/短链失效等）—— 仍走兜底路径，但
+        # 兜底也基本会失败，最后抛友好错里附上 yt-dlp 的原始错误便于排查
+        log.info("[dissect] yt-dlp 路径失败：%s", ytdlp_meta["_error"])
+        yt_dlp_err = ytdlp_meta["_error"]
+    else:
+        # yt-dlp 不可用（未装/未配 cookies）—— 静默走兜底
+        yt_dlp_err = None
+
+    # ============ 路径 2: requests + _parse_embedded_json ============
     try:
         r = _http_get(url)
     except requests.exceptions.Timeout as e:
@@ -531,7 +744,31 @@ def fetch_douyin(raw_url: str) -> dict:
                 html, final_url = r2.text or "", str(r2.url)
                 break
 
-    # ---------- 组装结构化结果 ----------
+    # ============ 路径 3: regex (在 item 为 None 时最后兜底) ============
+    # 如果 item 拿到了，直接走装配；否则用 regex 从 meta description 抠出基础字段。
+    # 但若整个 HTML 没 _VIDEO_PAGE_RENDER_DATA_ 且短链 final_url 是首页（无 /video/），
+    # 说明这八成是个**失效短链 / 被反爬重定向到首页**——这种情况下不要把首页 meta
+    # desc 当视频文案，**直接报错**（用 yt-dlp 的原始错误给用户更具体的指引）。
+    if item is None:
+        looks_like_homepage = (
+            vid is None
+            and ("/video/" not in final_url)
+            and "iesdouyin" not in final_url
+        )
+        if looks_like_homepage:
+            extra = ""
+            if yt_dlp_err:
+                if "Fresh cookies" in yt_dlp_err:
+                    extra = "（cookie 已过期，请重新导出 douyin.com 的 cookies 覆盖旧的，再重启 .bat）"
+                elif "Unsupported URL" in yt_dlp_err:
+                    extra = "（短链已失效/被反爬，建议换一个视频，或用抖音 App「复制完整链接」拿到长链再试）"
+                else:
+                    extra = f"（{yt_dlp_err}）"
+            raise DissectError(
+                f"没能从这个链接里读到视频信息。{extra or _MANUAL_HINT}"
+            )
+
+    # ---------- 组装结构化结果（item 优先，regex 兜底） ----------
     desc = title = author = create_time = cover = ""
     duration_sec: int | None = None
     stats = {"digg": None, "comment": None, "collect": None, "share": None}
