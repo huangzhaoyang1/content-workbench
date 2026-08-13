@@ -199,10 +199,15 @@ async def validation_exc_handler(_: Request, exc: RequestValidationError) -> JSO
 
 @app.exception_handler(Exception)
 async def unhandled_exc_handler(request: Request, exc: Exception) -> JSONResponse:
+    import traceback
+    tb = traceback.format_exc()
     log.exception("未处理异常 %s %s", request.method, request.url.path)
+    # 把最近 5 行堆栈附到 detail（仅服务端异常，不暴露给线上正常用户；本地调试很有用）
+    tb_tail = "\n".join(tb.strip().splitlines()[-8:])
+    detail = f"服务端异常：{type(exc).__name__}: {exc}\n\n{tb_tail}"
     return JSONResponse(
         status_code=500,
-        content=_error_body(500, f"服务端异常：{type(exc).__name__}", "internal_error"),
+        content=_error_body(500, detail, "internal_error"),
     )
 
 

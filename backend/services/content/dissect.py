@@ -596,7 +596,10 @@ def fetch_douyin(raw_url: str) -> dict:
         "已抓到视频描述。抖音网页端不提供口播字幕，如果下面的文案不是完整口播稿，"
         "建议手动补全后再拆解，出来的文章会具体得多。"
         if complete
-        else _INCOMPLETE_WARN.format(n=len(text))
+        else _INCOMPLETE_WARN.format(
+            n=len(text),
+            exp=_expected_chars(duration_sec) or len(text) * 5,
+        )
     )
 
     return {
