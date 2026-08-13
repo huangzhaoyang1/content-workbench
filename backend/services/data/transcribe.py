@@ -149,14 +149,63 @@ def _ytdl_common_opts(extra: dict | None = None) -> dict:
     return opts
 
 
-def _ffmpeg_exe() -> str | None:
-    """优先用 imageio-ffmpeg 自带的 ffmpeg 二进制，避免系统级 ffmpeg 依赖。"""
+def _ffmpeg_dir() -> str | None:
+    """返回同时包含 ffmpeg.exe 和 ffprobe.exe 的目录，给 yt-dlp 用。
+
+    历史 bug：imageio_ffmpeg 只提供 ffmpeg，没有 ffprobe —— yt-dlp 在后处理
+    （音频抽取）阶段会报 ``Postprocessing: ffmpeg and ffprobe not found``，
+    因为它要求 ``ffmpeg_location`` 指向的目录下两个二进制都存在。
+
+    优先级：
+      1) imageio_ffmpeg（同目录已有 ffprobe 时）—— 本地无下载
+      2) static_ffmpeg（首次会下载 ~100MB 的 ffmpeg+ffprobe，缓存复用）—— 标准兜底
+      3) PATH 上的 ffmpeg.exe（同目录有 ffprobe 时）—— 系统装了 ffmpeg
+    """
+    # 1) imageio_ffmpeg 本地无下载，但只提供 ffmpeg
     try:
         import imageio_ffmpeg
-
-        return imageio_ffmpeg.get_ffmpeg_exe()
+        d = Path(imageio_ffmpeg.get_ffmpeg_exe()).parent
+        if (d / "ffprobe.exe").exists():
+            return str(d)
     except Exception as e:  # noqa: BLE001
-        log.warning("imageio-ffmpeg 不可用：%s", e)
+        log.debug("imageio_ffmpeg 不可用：%s", e)
+
+    # 2) static_ffmpeg 兜底：自动下载 ffmpeg+ffmpeg 同包的 ffprobe
+    try:
+        import static_ffmpeg
+        # weak=True：PATH 上已有 ffmpeg/ffprobe 时跳过下载；都没有就拉一次（约 100MB）
+        static_ffmpeg.add_paths(weak=True)
+        pkg = Path(static_ffmpeg.__file__).parent
+        for cand in (pkg / "bin" / "win32", pkg / "bin" / "win64", pkg / "bin"):
+            if (cand / "ffmpeg.exe").exists() and (cand / "ffprobe.exe").exists():
+                return str(cand)
+        # add_paths 已把 bin 加到 PATH，直接 which 拿 ffmpeg.exe 假定同目录有 ffprobe
+        import shutil
+        fe = shutil.which("ffmpeg")
+        if fe and Path(fe).with_name("ffprobe.exe").exists():
+            return str(Path(fe).parent)
+    except Exception as e:  # noqa: BLE001
+        log.warning("static_ffmpeg 不可用：%s", e)
+
+    return None
+
+
+def _ffmpeg_exe() -> str | None:
+    """返回 ffmpeg 可执行文件路径（给 subprocess.run 直接调用用）。
+
+    优先从 ``_ffmpeg_dir()`` 拿到的目录里找 ffmpeg.exe（与 ffprobe 同目录），
+    找不到再退回 imageio_ffmpeg 的旧路径（仅当调用方不依赖 ffprobe 时可用）。
+    """
+    d = _ffmpeg_dir()
+    if d:
+        for name in ("ffmpeg.exe", "ffmpeg"):
+            p = Path(d) / name
+            if p.exists():
+                return str(p)
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -232,9 +281,10 @@ def _download_audio(url: str, workdir: Path) -> tuple[str | None, str | None]:
             }
         ],
     })
-    ffmpeg = _ffmpeg_exe()
-    if ffmpeg:
-        ydl_opts["ffmpeg_location"] = str(Path(ffmpeg).parent)
+    ffmpeg_dir = _ffmpeg_dir()
+    if ffmpeg_dir:
+        # yt-dlp 要求 ffmpeg_location 目录下 ffmpeg.exe + ffprobe.exe 同时存在
+        ydl_opts["ffmpeg_location"] = ffmpeg_dir
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
