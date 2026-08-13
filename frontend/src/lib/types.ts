@@ -737,7 +737,29 @@ export interface DissectTranscribeResult {
   duration_sec?: number | null;
   engine?: string;
   model?: string;
-  /** 失败原因（下载失败 / 超时 / 无声 等），ok=false 时一定有 */
+  /**
+   * 失败原因分类（前端据此显示不同引导）：
+   * - need_login      平台要求登录态（典型：抖音 Fresh cookies）
+   * - network         网络层失败（DNS / 防火墙 / 断网）
+   * - unsupported     链接不被识别或平台不支持
+   * - format          视频格式不支持
+   * - timeout         下载或转写超时
+   * - too_long        超过 10 分钟上限
+   * - transcribe_failed whisper 自身失败
+   * - invalid_input   缺少链接
+   * - unknown         其它（参考 error 字符串）
+   */
+  error_key?:
+    | "need_login"
+    | "network"
+    | "unsupported"
+    | "format"
+    | "timeout"
+    | "too_long"
+    | "transcribe_failed"
+    | "invalid_input"
+    | "unknown";
+  /** 用户可读的中文原因；ok=false 时包含如何操作 */
   error?: string;
 }
 

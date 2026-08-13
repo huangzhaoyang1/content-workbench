@@ -42,6 +42,82 @@ _DOWNLOAD_FAIL_HINT = (
     "建议打开抖音 App，开字幕把完整口播稿复制粘贴进来，拆解质量反而最高。"
 )
 
+# 错误分类标签，前端可据此给精准提示
+#   need_login    - 平台要求登录态（典型：抖音 Fresh cookies）
+#   network       - 网络层失败（断网 / DNS / 防火墙）
+#   unsupported   - 链接/平台暂不支持
+#   format        - 视频格式不支持（罕见）
+#   timeout       - 超时
+#   unknown       - 其它（保留真实 error 字符串供排查）
+
+
+def _classify_yt_dlp_error(msg: str) -> tuple[str, str]:
+    """把 yt-dlp 错误字符串分类成 (error_key, 用户可读的中文原因)。
+
+    返回 (key, msg_zh)；key 是机器可读枚举，msg_zh 给前端展示用。
+    """
+    if not msg:
+        return "unknown", "下载失败，原因未知"
+    m = msg.lower()
+    # 抖音 / TikTok 登录态
+    if any(k in m for k in ("fresh cookies", "cookies are needed", "登录", "log in")):
+        return (
+            "need_login",
+            "这条视频需要登录态才能下载（抖音 / TikTok 等平台对未登录请求拒绝）。"
+            "如果你能登录抖音网页版，把导出的 cookies 文件发给开发者配进后端"
+            "（环境变量 ASR_DOUYIN_COOKIES），即可解锁本条；"
+            "否则请打开抖音 App → 字幕 → 复制完整口播稿 → 粘贴进下面的框。",
+        )
+    # 抖音网页拿不到 JSON
+    if "failed to parse json" in m or "expecting value" in m:
+        return (
+            "need_login",
+            "抖音网页接口拒绝返回数据，多半是没登录态触发了风控。"
+            "建议打开抖音 App，开字幕手动复制完整口播稿粘贴进来。",
+        )
+    # 网络问题
+    if any(k in m for k in ("could not connect", "connection refused", "timed out",
+                            "no route to host", "getaddrinfo", "ssl:")):
+        return (
+            "network",
+            "网络层失败：后端到视频平台的网络不通（本机 / VPN / 防火墙）。"
+            "请检查网络或重试一次；仍失败就手动粘贴口播稿。",
+        )
+    # 链接不支持
+    if any(k in m for k in ("unsupported url", "no video could be found",
+                            "is not a valid url", "unable to extract")):
+        return (
+            "unsupported",
+            "链接格式不被识别或平台暂不支持。请确认是抖音 / TikTok / B 站 等公开视频链接，"
+            "或直接手动粘贴口播稿。",
+        )
+    return "unknown", f"下载失败：{msg[:160]}"
+
+
+def _ytdl_common_opts(extra: dict | None = None) -> dict:
+    """yt-dlp 的通用下载器配置：UA、Referer、可选 cookies 文件。"""
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "http_headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            ),
+            "Referer": "https://www.douyin.com/",
+        },
+    }
+    # cookies 文件：env 配 ASR_DOUYIN_COOKIES=/abs/path/to/cookies.txt
+    # 文件不存在或读取失败 → 静默忽略（让调用方按需报错）
+    import os
+    ck = os.environ.get("ASR_DOUYIN_COOKIES", "").strip()
+    if ck and os.path.isfile(ck):
+        opts["cookiefile"] = ck
+    if extra:
+        opts.update(extra)
+    return opts
+
 
 def _ffmpeg_exe() -> str | None:
     """优先用 imageio-ffmpeg 自带的 ffmpeg 二进制，避免系统级 ffmpeg 依赖。"""
@@ -55,7 +131,12 @@ def _ffmpeg_exe() -> str | None:
 
 
 def _with_timeout(func, timeout: int, *args, **kwargs):
-    """在线程里跑 func，超时返回 (None, '操作超时')；否则返回 func 的真实返回值。"""
+    """在线程里跑 func，超时返回 (None, '操作超时')；否则直接把 func 的返回值原样返回。
+
+    注意：func 自己如果是 tuple 形式（(value, err)），我们**不**再二次打包成
+    ((value, err), None)，否则调用方解构时会拿到嵌套 tuple 进而触发：
+        TypeError: '>' not supported between instances of 'tuple' and 'int'
+    """
     box: dict[str, Any] = {}
     exc: list[Exception] = []
 
@@ -69,10 +150,11 @@ def _with_timeout(func, timeout: int, *args, **kwargs):
     th.start()
     th.join(timeout)
     if th.is_alive():
+        # 让超时的函数返回值（如果是 tuple-returning）也对调用方友好：返回 (None, 错误)
         return None, "操作超时"
     if exc:
         return None, f"{type(exc[0]).__name__}: {exc[0]}"
-    return box.get("r"), None
+    return box.get("r")
 
 
 def _embedded_json_duration(url: str) -> tuple[float | None, str | None]:
@@ -82,24 +164,20 @@ def _embedded_json_duration(url: str) -> tuple[float | None, str | None]:
     except Exception as e:  # noqa: BLE001
         return None, f"yt-dlp 未安装：{e}"
 
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "simulate": True,
-        "http_headers": {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-            ),
-            "Referer": "https://www.douyin.com/",
-        },
-    }
+    ydl_opts = _ytdl_common_opts({"skip_download": True, "simulate": True})
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
         dur = info.get("duration")
-        return (float(dur) if dur else None), None
+        # 新版 yt-dlp 偶尔返回 (seconds, None) 或 list；统一取数值或 None
+        if isinstance(dur, (tuple, list)):
+            dur = dur[0] if dur else None
+        if dur is not None:
+            try:
+                return float(dur), None
+            except (TypeError, ValueError):
+                return None, None
+        return None, None
     except Exception as e:  # noqa: BLE001
         return None, f"{type(e).__name__}: {e}"
 
@@ -112,12 +190,9 @@ def _download_audio(url: str, workdir: Path) -> tuple[str | None, str | None]:
         return None, f"yt-dlp 未安装：{e}"
 
     out_tmpl = str(workdir / "audio.%(ext)s")
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
+    ydl_opts = _ytdl_common_opts({
         "format": "bestaudio/best",
         "outtmpl": out_tmpl,
-        "noplaylist": True,
         "noprogress": True,
         "postprocessors": [
             {
@@ -126,14 +201,7 @@ def _download_audio(url: str, workdir: Path) -> tuple[str | None, str | None]:
                 "preferredquality": "128",
             }
         ],
-        "http_headers": {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-            ),
-            "Referer": "https://www.douyin.com/",
-        },
-    }
+    })
     ffmpeg = _ffmpeg_exe()
     if ffmpeg:
         ydl_opts["ffmpeg_location"] = str(Path(ffmpeg).parent)
@@ -142,7 +210,13 @@ def _download_audio(url: str, workdir: Path) -> tuple[str | None, str | None]:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
     except Exception as e:  # noqa: BLE001
-        return None, f"{type(e).__name__}: {e}"
+        # 不把整条 stack 报给前端，只取关键片段
+        raw = str(e)
+        if "ERROR:" in raw:
+            # yt-dlp 把错误信息包成 "ERROR: ..." 多条，简化
+            line = raw.split("ERROR:")[-1].split("\n")[0].strip()[:160]
+            return None, line or raw[:160]
+        return None, raw[:160]
 
     for ext in ("mp3", "m4a", "webm", "ogg", "opus"):
         cand = workdir / f"audio.{ext}"
@@ -265,6 +339,7 @@ def transcribe_video(
             "text": "",
             "duration_sec": None,
             "engine": "whisper",
+            "error_key": "invalid_input",
             "error": "缺少视频链接或 id",
         }
 
@@ -281,6 +356,7 @@ def transcribe_video(
                 "text": "",
                 "duration_sec": round(dur),
                 "engine": "whisper",
+                "error_key": "too_long",
                 "error": (
                     f"视频时长约 {int(dur // 60)} 分，超过 10 分钟上限，"
                     "转写成本太高，建议手动粘贴完整口播稿。"
@@ -290,12 +366,14 @@ def transcribe_video(
         # ---------- 下载音频（带超时） ----------
         audio, aerr = _with_timeout(_download_audio, _DOWNLOAD_TIMEOUT_SEC, url, workdir)
         if aerr:
+            key, msg_zh = _classify_yt_dlp_error(aerr)
             if aerr == "操作超时":
                 return {
                     "ok": False,
                     "text": "",
                     "duration_sec": (round(dur) if dur else None),
                     "engine": "whisper",
+                    "error_key": "timeout",
                     "error": f"{_DOWNLOAD_FAIL_HINT}（原因：下载超时）",
                 }
             return {
@@ -303,7 +381,8 @@ def transcribe_video(
                 "text": "",
                 "duration_sec": (round(dur) if dur else None),
                 "engine": "whisper",
-                "error": f"{_DOWNLOAD_FAIL_HINT}（原因：{aerr}）",
+                "error_key": key,
+                "error": msg_zh,
             }
 
         # ---------- 下载后再核一次时长（准确） ----------
@@ -314,6 +393,7 @@ def transcribe_video(
                 "text": "",
                 "duration_sec": round(real_dur),
                 "engine": "whisper",
+                "error_key": "too_long",
                 "error": (
                     f"视频时长约 {int(real_dur // 60)} 分，超过 10 分钟上限，"
                     "转写成本太高，建议手动粘贴完整口播稿。"
@@ -338,6 +418,7 @@ def transcribe_video(
                 "duration_sec": (round(dur) if dur else None),
                 "engine": "whisper",
                 "model": mdl,
+                "error_key": "transcribe_failed",
                 "error": terr,
             }
 
