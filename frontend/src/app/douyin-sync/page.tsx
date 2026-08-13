@@ -47,6 +47,120 @@ import type {
   TopicLibraryItem,
 } from "@/lib/types";
 
+/** 客户端纯 JS 的 Cookie 头解析（与后端 _parse_cookie_header 行为一致）。
+ *  用于「用户在输入框粘贴时实时诊断」，不上行。
+ *
+ * 关键优化：识别 Set-Cookie 单条格式（带 Domain/Path/Expires/HttpOnly 等
+ * 属性），那是 Response Headers 里的，不是请求头 Cookie 行。
+ */
+const SET_COOKIE_ATTR_NAMES = new Set([
+  "Domain",
+  "Path",
+  "Expires",
+  "Max-Age",
+  "SameSite",
+  "Priority",
+  "Partitioned",
+]);
+// 登录态的「关键字段」—— 粘的 Cookie 里有 ≥ 1 才有可能是登录态。
+const LOGIN_KEY_FIELDS = [
+  "sessionid",
+  "msToken",
+  "sid_tt",
+  "uid_tt",
+  "passport_csrf_token",
+  "odin_tt",
+] as const;
+
+function parseCookieHeader(raw: string): {
+  count: number;
+  names: string[];
+  looksLikeSetCookie: boolean;
+} {
+  const s = (raw || "").trim();
+  if (!s) return { count: 0, names: [], looksLikeSetCookie: false };
+  // 检测「Set-Cookie 单条」特征：含 Domain= 或 Path= 或裸 HttpOnly/Secure
+  const looksLikeSetCookie =
+    /(?:\b|;)\s*(Domain|Path|Expires|Max-Age|SameSite|Priority)\s*=/i.test(s) ||
+    /;\s*(Secure|HttpOnly)\s*(?:;|$)/i.test(s);
+  const names: string[] = [];
+  // 还原后端的过滤逻辑：
+  //   name=value 才进；name ∈ SET_COOKIE_ATTR_NAMES 跳过；裸 Secure/HttpOnly 跳过
+  // 用字符串 split + indexOf 实现，避开 tsconfig target=es5 不能迭代 RegExpStringIterator 的限制
+  for (const part of s.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq <= 0) continue;
+    const name = part.slice(0, eq).trim();
+    let val = part.slice(eq + 1).trim();
+    if (val.startsWith('"') && val.endsWith('"') && val.length >= 2) {
+      val = val.slice(1, -1);
+    }
+    if (!name || !val) continue;
+    if (SET_COOKIE_ATTR_NAMES.has(name)) continue;
+    if (names.includes(name)) continue;
+    names.push(name);
+  }
+  return { count: names.length, names, looksLikeSetCookie };
+}
+
+function CookieDiagnostics({ value }: { value: string }) {
+  const { count, names, looksLikeSetCookie } = React.useMemo(
+    () => parseCookieHeader(value),
+    [value]
+  );
+  if (!value.trim()) return null;
+  const nameSet = new Set(names.map((n) => n.toLowerCase()));
+  const hitLoginFields = LOGIN_KEY_FIELDS.filter((f) =>
+    nameSet.has(f.toLowerCase())
+  );
+  // 等级：
+  //   - looksLikeSetCookie → 红色：八成复制错了
+  //   - count < 3 → 黄色：登录态 cookie 通常 ≥ 5 条
+  //   - count >= 3 且 hitLoginFields → 绿色：看起来完整
+  const errLevel: "error" | "warn" | "ok" = looksLikeSetCookie
+    ? "error"
+    : count < 3
+      ? "warn"
+      : hitLoginFields.length === 0
+        ? "warn"
+        : "ok";
+  const wrapClass =
+    errLevel === "error"
+      ? "border-destructive/40 bg-destructive/10 text-destructive"
+      : errLevel === "warn"
+        ? "border-warning/40 bg-warning/10 text-warning-foreground"
+        : "border-success/40 bg-success/10 text-success";
+  return (
+    <div className={`rounded-md border px-2.5 py-1.5 text-[11px] ${wrapClass}`}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-medium">
+        <span>解析出 {count} 条 cookie</span>
+        <span>·</span>
+        <span>长度 {value.length} 字符</span>
+        {hitLoginFields.length > 0 && (
+          <>
+            <span>·</span>
+            <span>命中登录关键字段：{hitLoginFields.join(", ")}</span>
+          </>
+        )}
+      </div>
+      {errLevel !== "ok" && (
+        <div className="mt-1 text-[11px] leading-relaxed opacity-90">
+          {looksLikeSetCookie
+            ? "⚠ 这看起来是「Response Headers → Set-Cookie」单条 cookie（含 Domain/Path/Expires 等属性），不是「Request Headers → Cookie」整段。请重新复制：Network 面板 → 任意请求 → 找 Cookie: 那一整行（每条 k=v，用 ; 空格分隔）。"
+            : count < 3
+              ? "⚠ 太短了：登录态 Cookie 通常 ≥ 5 条；当前很可能只粘了单条 cookie，请去 Network → Cookie 行复制完整内容。"
+              : "⚠ 还没有 sessionid / msToken / odin_tt 这些关键登录字段，登录态可能无效，建议去 Network → Cookie 行再复制一次。"}
+        </div>
+      )}
+      {errLevel === "ok" && (
+        <div className="mt-1 text-[11px] leading-relaxed opacity-90">
+          ✓ 看起来是完整的登录态 Cookie，按下面保存即可。
+        </div>
+      )}
+    </div>
+  );
+}
+
 const STATUS_LABEL: Record<DouyinSyncRecordStatus, string> = {
   new: "待入库",
   imported: "已入库",
@@ -655,7 +769,7 @@ export default function DouyinSyncPage() {
                       placeholder={
                         config?.cookie_set
                           ? "已配置 Cookie；留空表示不修改，要更新就粘贴新的"
-                          : "ttwid=abc...; sessionid=xyz...; odin_tt=...; ..."
+                          : "粘贴这里（建议选 Network 面板第一个请求 → Request Headers → cookie: 冒号后面的整段，多对 k=v 用「; 」分隔）"
                       }
                       rows={3}
                       className="font-mono text-xs"
@@ -664,6 +778,23 @@ export default function DouyinSyncPage() {
                         setDirtyCfg(true);
                       }}
                     />
+                    {/* 实时诊断：粘贴即判，避免「保存后发现没用」再来回试 */}
+                    <CookieDiagnostics value={cookieDraft} />
+                    {cookieDraft && (
+                      <div className="flex justify-end">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            setCookieDraft("");
+                            setDirtyCfg(true);
+                          }}
+                          className="h-6 text-[11px] text-muted-foreground"
+                        >
+                          清空
+                        </Button>
+                      </div>
+                    )}
                     <p className="text-xs text-muted-foreground">
                       出于安全，保存后前端只回传「是否已配置」状态，不回传明文；失效时需重新粘贴。
                     </p>
@@ -704,18 +835,31 @@ export default function DouyinSyncPage() {
                           <span className="font-medium text-foreground">Request Headers（请求头）</span>{" "}
                           里找到 <code className="rounded bg-background px-1">cookie:</code>{" "}
                           那一整行，<span className="font-semibold text-foreground">只复制冒号后面的值</span>
+                          ；
+                          <span className="text-destructive"> 别选 Response 那边的 Set-Cookie（只有一两条）</span>
                         </li>
                         <li>
                           <span className="font-semibold text-foreground">⑤</span>{" "}
-                          粘贴到上方文本框 → 滚到页面底部点「保存配置」→ 看到
-                          <span className="font-medium text-foreground">「Cookie 已保存」</span>
+                          粘贴到上方文本框 → 看到「解析出 ≥ 5 条 + 命中 sessionid/msToken」绿色提示
+                          → 点「保存配置」→ 看到{" "}
+                          <span className="font-medium text-foreground">「Cookie 已保存」</span>{" "}
                           后即可去「即时拆解」自动转写视频
                         </li>
                       </ol>
-                      <p className="px-3 pb-3 text-[11px] text-muted-foreground">
-                        Cookie 一般几小时到几天会过期；只要「即时拆解」又开始频繁报「需要登录态」，
-                        重新来一次这 5 步就行。
-                      </p>
+                      <div className="space-y-1 px-3 pb-3 text-[11px] text-muted-foreground">
+                        <p className="font-medium text-foreground/70">✅ 正确示例：</p>
+                        <pre className="overflow-x-auto rounded border border-success/30 bg-success/5 px-2 py-1 font-mono leading-snug text-success">
+{`ttwid=1%7Cabc...; sessionid=abc...; msToken=def...; odin_tt=ghi...; sid_tt=jkl...; uid_tt=mno...; webid=pqr...`}
+                        </pre>
+                        <p className="pt-1 font-medium text-destructive/70">❌ 错误示例（复制的是 Response 的 Set-Cookie 单条）：</p>
+                        <pre className="overflow-x-auto rounded border border-destructive/30 bg-destructive/5 px-2 py-1 font-mono leading-snug text-destructive">
+{`ttwid=1%7Cabc...; Domain=.douyin.com; Path=/; Expires=...; HttpOnly; Secure; SameSite=None`}
+                        </pre>
+                        <p>
+                          Cookie 一般几小时到几天会过期；只要「即时拆解」又开始频繁报「需要登录态」，
+                          重新来一次这 5 步就行。
+                        </p>
+                      </div>
                     </details>
                   </div>
 

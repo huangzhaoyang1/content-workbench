@@ -83,14 +83,28 @@ def _read_env_cookie_file() -> str:
 
 # 已编译正则：解析 Cookie 头里的 name=value 对，忽略空白/引号
 _COOKIE_KV_RE = re.compile(r"([^=;\s]+)\s*=\s*(\"[^\"]*\"|[^;]+)")
+# 这些在「单条 Set-Cookie」格式里是**属性**，不是 cookie。盲目解析会把它们当成
+# cookie 名（name="Domain" value=".douyin.com"），污染 yt-dlp / requests。
+# Set-Cookie RFC 6265 定义的属性关键字（大小写不敏感）；"HttpOnly"/"Secure"
+# 是裸 flag（无 =），我们在 _parse_cookie_header 里单独识别并跳过。
+_SET_COOKIE_ATTRS_NORMAL = {
+    "domain", "path", "expires", "max-age", "samesite", "priority",
+    "partitioned",
+}
+# Set-Cookie 属性：裸 flag 关键字（不带 =）
+_SET_COOKIE_BARE_FLAGS = {"httponly", "secure"}
 
 
 def _parse_cookie_header(header: str) -> dict[str, str]:
     """把浏览器 Cookie 头字符串解析成 {name: value} dict。
 
     - 容忍 `name=value`、`name="value with,comma"`、`name=value; name2=v2`。
+    - **不再把 Set-Cookie 属性当 cookie**：发现 `Domain=xxx` / `Path=xxx` /
+      `Expires=xxx` / `Max-Age=xxx` / `SameSite=xxx` / `Priority=xxx` 等
+      Set-Cookie 风格的属性 token 会跳过；同理裸 `Secure` / `HttpOnly` 也跳过。
+      解决「用户从 Response Headers 的 Set-Cookie 单条复制过来」的污染问题。
     - 不做 URL 解码，留给后端/yt-dlp 自己处理（yt-dlp 也不解码）。
-    - value 含多余引号的会保留；空值会被丢弃。
+    - value 含多余引号的会保留；空值会被丢弃；最后一条同名 name 胜出。
     """
     out: dict[str, str] = {}
     for m in _COOKIE_KV_RE.finditer(header or ""):
@@ -98,8 +112,20 @@ def _parse_cookie_header(header: str) -> dict[str, str]:
         val = m.group(2).strip()
         if val.startswith('"') and val.endswith('"') and len(val) >= 2:
             val = val[1:-1]
-        if name and val:
-            out[name] = val
+        lname = name.lower()
+        if not name or not val:
+            continue
+        # Set-Cookie 属性：跳过，避免污染 yt-dlp / requests
+        if lname in _SET_COOKIE_ATTRS_NORMAL:
+            continue
+        out[name] = val
+
+    # 单独识别裸 flag（Secure / HttpOnly）— 用分号切分后看每个 token 是不是裸关键字
+    if header:
+        for tok in re.split(r"[;\n]+", header):
+            t = tok.strip()
+            if t.lower() in _SET_COOKIE_BARE_FLAGS:
+                continue  # 这就是 Set-Cookie 属性的裸 flag，跳过
     return out
 
 
