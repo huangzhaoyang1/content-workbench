@@ -422,7 +422,29 @@ def _regex_texts(html: str) -> list[str]:
     return [c for c in out if len(c) >= 8 and not any(n in c for n in _NOISE)]
 
 
+def _load_netscape_cookies(path: str) -> dict:
+    """从 Netscape cookies.txt 里读出 {name: value} dict（requests.cookies 用）。
+
+    抖音对未登录请求直接拒，必须带 cookie；user 可以把浏览器导出的
+    Netscape cookies.txt 放到 ASR_DOUYIN_COOKIES 路径下，本函数会自动读取。
+
+    格式（Netscape HTTP Cookie File 标准）：
+        domain  flag  path  secure  expires  name  value
+    行首 `#` 是注释（但 `# Netscape HTTP Cookie File` / `#HttpOnly_` 是元数据，要保留 #HttpOnly_）。
+    """
+    import http.cookiejar
+
+    jar = http.cookiejar.MozillaCookieJar(path)
+    try:
+        jar.load(ignore_discard=True, ignore_expires=True)
+    except Exception as e:  # noqa: BLE001
+        log.warning("[dissect] 读取 cookie 文件失败 (%s): %s", path, e)
+        return {}
+    return {c.name: c.value for c in jar}
+
+
 def _http_get(url: str, *, mobile: bool = True, timeout: int = 15):
+    import os
     import requests
     import urllib3  # 懒加载
 
@@ -436,9 +458,20 @@ def _http_get(url: str, *, mobile: bool = True, timeout: int = 15):
     # 经常出现证书链不匹配 / 中间代理替换证书，导致 SSLError。我们只抓公开视频页内容，
     # 不带任何用户凭据，业界抖音/TikTok 抓取一律 verify=False；只在本进程内静默警告。
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    # 带 cookie：抖音对未登录的抓取直接返回验证页/空 HTML。
+    # cookies 文件路径由启动 AI内容工作台.bat 自动从 C:\Users\黄朝扬\douyin_cookies.txt 检测 + 注入。
+    cookies: dict[str, str] = {}
+    cookie_path = os.environ.get("ASR_DOUYIN_COOKIES", "").strip()
+    if cookie_path and os.path.isfile(cookie_path):
+        cookies = _load_netscape_cookies(cookie_path)
+        if cookies:
+            log.info("[dissect] 已加载 %d 条 douyin cookies（%s）", len(cookies), cookie_path)
+
     return requests.get(
         url,
         headers=headers,
+        cookies=cookies or None,
         timeout=timeout,
         allow_redirects=True,
         verify=False,
