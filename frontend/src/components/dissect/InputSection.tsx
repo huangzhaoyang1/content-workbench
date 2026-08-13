@@ -64,13 +64,27 @@ function fmtDuration(sec: number | null | undefined): string {
 }
 
 /** 从抖音分享口令里抠出真正的 URL。
- *  抖音 App 复制出来的「分享口令」会塞一堆标题/话题/"复制此链接..."提示，
- *  我们要替用户把那部分去掉。和后端 extract_url() 行为一致：
- *  链接由 https?:// 开头，遇到空白/中文字符/中文标点就停。 */
-const SHARE_URL_RE = /https?:\/\/[^\s\u4e00-\u9fff，。！？、）)]+/;
+ *  抖音 App 复制出来的分享口令格式：
+ *    "4.38 复制打开抖音，看看【...】让我... https://v.douyin.com/oN45lt7e5bk/04/20 oDH:/e"
+ *  其中真正可用的 URL 只有 "https://v.douyin.com/oN45lt7e5bk/"，
+ *  后面的 "/04/20 oDH:/e" 是抖音分享跟踪码，必须剥掉。
+ *  优先级与后端 extract_url() 一致。 */
+const SHARE_URL_PATTERNS: RegExp[] = [
+  // 短链 v/www/m.douyin.com/<short_id>（用 negative lookahead 排除 /video/ /share/ 等长链）
+  /https?:\/\/[a-zA-Z]+\.douyin\.com\/(?!video\/|share\/|note\/|user\/)[A-Za-z0-9_-]+/,
+  // 长链 www.douyin.com/video/<digits>
+  /https?:\/\/www\.douyin\.com\/video\/\d+/,
+  // iesdouyin 分享页
+  /https?:\/\/[a-zA-Z]*iesdouyin\.com\/share\/video\/\d+/,
+  // 兜底：任意 URL
+  /https?:\/\/[^\s\u4e00-\u9fff，。！？、）)]+/,
+];
 function extractShareUrl(text: string): string {
-  const m = text.match(SHARE_URL_RE);
-  return m ? m[0] : "";
+  for (const pat of SHARE_URL_PATTERNS) {
+    const m = text.match(pat);
+    if (m) return m[0].replace(/\/$/, "");
+  }
+  return "";
 }
 
 /** 结构化字段的一个小格子 */

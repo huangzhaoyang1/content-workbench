@@ -233,8 +233,33 @@ _NOISE = ("抖音-记录美好生活", "验证", "你访问的页面", "Verifica
 
 
 def extract_url(raw: str) -> str:
-    """从抖音分享口令里抠出真正的链接（分享文本里混着大量提示语）。"""
-    m = re.search(r"https?://[^\s\u4e00-\u9fff，。！？、）)]+", raw or "")
+    """从抖音分享口令里抠出真正的链接（分享文本里混着大量提示语）。
+
+    抖音 App 复制出来的分享口令格式：
+        "4.38 复制打开抖音，看看【...】让我... https://v.douyin.com/oN45lt7e5bk/04/20 oDH:/e"
+    其中真正可用的 URL 只有 "https://v.douyin.com/oN45lt7e5bk/"，
+    后面的 "/04/20 oDH:/e" 是抖音分享跟踪码，必须剥掉。
+
+    优先级：
+      1. 抖音短链 v/www/m.douyin.com/<short_id>（排除带 /video/ /share/ 等长链路径）
+      2. 抖音长链 www.douyin.com/video/<digits>
+      3. iesdouyin 分享页 ...iesdouyin.com/share/video/<digits>
+      4. 兜底：任意 URL（可能含多余路径，给 yt-dlp 自动 follow redirect 兜住）
+    """
+    s = (raw or "").strip()
+    patterns = (
+        # 短链：排除 /video/ /share/ /note/ /user/ 等长链关键词，否则 pattern 1
+        # 会把 "https://www.douyin.com/video/<digits>" 的 "video" 当成短链 ID 抠错。
+        r"https?://[a-zA-Z]+\.douyin\.com/(?!video/|share/|note/|user/)[A-Za-z0-9_-]+",
+        r"https?://www\.douyin\.com/video/\d+",
+        r"https?://[a-zA-Z]*iesdouyin\.com/share/video/\d+",
+    )
+    for pat in patterns:
+        m = re.search(pat, s)
+        if m:
+            return m.group(0)
+    # 兜底：任何 http(s) URL（遇到空白/中文/中文标点停）
+    m = re.search(r"https?://[^\s\u4e00-\u9fff，。！？、）)]+", s)
     return m.group(0).rstrip("/") if m else ""
 
 
@@ -356,7 +381,8 @@ def _regex_texts(html: str) -> list[str]:
 
 
 def _http_get(url: str, *, mobile: bool = True, timeout: int = 15):
-    import requests  # 懒加载
+    import requests
+    import urllib3  # 懒加载
 
     headers = {
         "User-Agent": _UA_MOBILE if mobile else _UA_DESKTOP,
@@ -364,7 +390,17 @@ def _http_get(url: str, *, mobile: bool = True, timeout: int = 15):
         "Accept-Language": "zh-CN,zh;q=0.9",
         "Referer": "https://www.douyin.com/",
     }
-    return requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+    # 抖音抓取的实战坑：v.douyin.com → iesdouyin.com → www.douyin.com 三跳重定向里，
+    # 经常出现证书链不匹配 / 中间代理替换证书，导致 SSLError。我们只抓公开视频页内容，
+    # 不带任何用户凭据，业界抖音/TikTok 抓取一律 verify=False；只在本进程内静默警告。
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    return requests.get(
+        url,
+        headers=headers,
+        timeout=timeout,
+        allow_redirects=True,
+        verify=False,
+    )
 
 
 def fetch_douyin(raw_url: str) -> dict:
@@ -390,6 +426,13 @@ def fetch_douyin(raw_url: str) -> dict:
         r = _http_get(url)
     except requests.exceptions.Timeout as e:
         raise DissectError(f"抓取抖音页面超时。{_MANUAL_HINT}") from e
+    except requests.exceptions.SSLError as e:
+        # 历史：在 requests 默认 verify=True 下，抖音重定向链经常出现证书不匹配。
+        # 我们在 _http_get 里已经全局 verify=False；如果还走到这里说明是更深的网络问题。
+        raise DissectError(
+            f"抓取抖音页面失败（SSL 握手错误）。可能是公司/网络代理拦截了抖音，"
+            f"或抖音对该 IP 段做了限制。建议切到「手动粘贴」。{_MANUAL_HINT}"
+        ) from e
     except requests.exceptions.RequestException as e:
         raise DissectError(f"抓取抖音页面失败（{type(e).__name__}）。{_MANUAL_HINT}") from e
 
