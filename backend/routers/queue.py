@@ -16,6 +16,7 @@ class QueueAddReq(BaseModel):
     platform: str = "wechat"
     source: str = "manual"
     topic_id: str = ""  # 关联选题库条目 id（用于生产完成后翻转状态）
+    review: bool = False  # 透传：是否走「待审核」而非直推微信
     # 批量加入（选题页/历史任务页一次带多条时用）
     items: list[dict] | None = None
 
@@ -36,7 +37,8 @@ def add_to_queue(body: QueueAddReq) -> dict:
         return {"added": len(added), "items": added, **task_queue.stats()}
     try:
         item = task_queue.add(
-            body.topic, body.angle, body.extra, body.platform, body.source, body.topic_id
+            body.topic, body.angle, body.extra, body.platform, body.source, body.topic_id,
+            body.review,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

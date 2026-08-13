@@ -74,8 +74,13 @@ def _save() -> None:
 
 def add(topic: str, angle: str = "", extra: str = "",
         platform: str = "wechat", source: str = "manual",
-        topic_id: str = "") -> dict:
-    """加入队列，返回新任务。topic_id 可选，用于和「选题库」联动翻转状态。"""
+        topic_id: str = "", review: bool = False) -> dict:
+    """加入队列，返回新任务。topic_id 可选，用于和「选题库」联动翻转状态。
+
+    review=True 时透传给 pipeline.start，流水线只产出本地文章+封面，
+    草稿存为「待审核」（不推送微信）。用于抖音线等希望先审后发的场景。
+    旧条目/旧调用无 review 字段时默认 False，行为不变。
+    """
     topic = (topic or "").strip()
     if not topic:
         raise ValueError("选题主题不能为空")
@@ -87,6 +92,7 @@ def add(topic: str, angle: str = "", extra: str = "",
         "platform": platform or "wechat",
         "source": source,          # manual / topic / tasks / schedule
         "topic_id": (topic_id or "").strip(),  # 关联选题库条目 id（可为空）
+        "review": bool(review),    # 透传：是否走「待审核」而非直推微信
         "status": "waiting",       # waiting / running / success / failed
         "issue": None,
         "task_id": None,
@@ -110,6 +116,7 @@ def add_many(items: list[dict], source: str = "manual") -> list[dict]:
                 it.get("topic", ""), it.get("angle", ""), it.get("extra", ""),
                 it.get("platform", "wechat"), source,
                 it.get("topic_id", ""),
+                it.get("review", False),
             ))
         except ValueError:
             continue
@@ -222,13 +229,14 @@ def _run_loop() -> None:
                 item["topic"], item["angle"], item["extra"], item["platform"]
             )
             item_id = item["id"]
+            review = bool(item.get("review", False))  # 透传：旧条目无此字段默认 False
 
         # 联动选题库：开始生产即标记「生产中」
         _flip_topic(item.get("topic_id") or "", "生产中")
 
         final_status: str | None = None
         try:
-            res = pipeline.start(topic=topic, angle=angle, extra=extra, platform=platform)
+            res = pipeline.start(topic=topic, angle=angle, extra=extra, platform=platform, review=review)
             task_id, issue = res["task_id"], res["issue"]
             with _LOCK:
                 cur = _find(item_id)

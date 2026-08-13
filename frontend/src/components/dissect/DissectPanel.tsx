@@ -15,10 +15,15 @@ import {
   Brain,
   FileText,
   RefreshCw,
+  CheckCircle2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card, CardHeader, CardContent, CardTitle, CardDescription } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
@@ -35,6 +40,7 @@ import type {
   DissectAnalyzeResult,
   RewriteResult,
   TopicLibraryItem,
+  PipelineStatus,
 } from "@/lib/types";
 
 /** 三个改写角度的前端展示元信息（后端没返回 label 时兜底用）。 */
@@ -84,6 +90,20 @@ export function DissectPanel({ embedded = false }: { embedded?: boolean }) {
   const [copying, setCopying] = React.useState(false);
   const [libOpen, setLibOpen] = React.useState(false);
   const [libCount, setLibCount] = React.useState(0);
+
+  // 抖音线后半衔接：候选选题 → 选择并生产 → 就地表单/日志（对齐热点线 /topic 体验）
+  const [producePhase, setProducePhase] = React.useState<"idle" | "form" | "running" | "done">("idle");
+  const [pickedKey, setPickedKey] = React.useState<string>("");
+  const [fTopic, setFTopic] = React.useState("");
+  const [fAngle, setFAngle] = React.useState("");
+  const [fExtra, setFExtra] = React.useState("");
+  const [fPlatform] = React.useState("wechat"); // 抖音线固定走微信平台，UI 不切换
+  const [fReview, setFReview] = React.useState(true); // 抖音线默认进待审核（不再默认直推微信）
+  const [task, setTask] = React.useState<PipelineStatus | null>(null);
+  const [producing, setProducing] = React.useState(false);
+  const logBoxRef = React.useRef<HTMLDivElement | null>(null);
+  const logEndRef = React.useRef<HTMLDivElement | null>(null);
+  const [autoScroll, setAutoScroll] = React.useState(true);
 
   const rewrites = React.useMemo<RewriteResult[]>(
     () =>
@@ -269,16 +289,113 @@ export function DissectPanel({ embedded = false }: { embedded?: boolean }) {
     }
   };
 
-  const handleProduce = () => {
+  // 「直接生产」改造为：对当前篇一键就地生产（默认待审核，不再跳 /queue 直推微信）
+  const handleProduce = async () => {
     if (!current || !currentTitle) return;
-    queueDraft.set({
+    await startInlineProduce({
       topic: currentTitle,
       angle: current.angle_label ?? metaOf(currentKey).label,
       extra: current.content,
+      review: true,
     });
-    toast("正在自动开始生产…", "info");
-    router.push("/queue");
   };
+
+  // 候选卡片「选择并生产」：预填表单并就地展开
+  const pickProduce = (key: string) => {
+    const item = switcherItems.find((s) => s.key === key);
+    const r = versions[key]?.[activeVer[key] ?? 0];
+    setPickedKey(key);
+    setFTopic(item?.title ?? r?.titles?.[0] ?? "");
+    setFAngle(item?.angleLabel ?? r?.angle_label ?? "");
+    setFExtra(r?.content ?? "");
+    setFReview(true);
+    setTask(null);
+    setProducePhase("form");
+  };
+
+  // 就地启动流水线（带 review 透传；抖音线默认进待审核）
+  const startInlineProduce = async (payload?: {
+    topic?: string;
+    angle?: string;
+    extra?: string;
+    review?: boolean;
+  }) => {
+    const topic = (payload?.topic ?? fTopic).trim();
+    const angle = payload?.angle ?? fAngle;
+    const extra = payload?.extra ?? fExtra;
+    const review = payload?.review ?? fReview;
+    if (!topic) {
+      toast("请填写选题标题", "warning");
+      return;
+    }
+    setProducing(true);
+    try {
+      const res = await api.startPipeline({
+        topic,
+        angle,
+        extra,
+        platform: fPlatform,
+        review,
+      });
+      setTask({
+        task_id: res.task_id,
+        issue: res.issue,
+        topic,
+        angle,
+        platform: fPlatform,
+        status: "pending",
+        logs: [],
+        returncode: null,
+        error: null,
+        created_at: "",
+        finished_at: null,
+      });
+      setAutoScroll(true);
+      setProducePhase("running");
+      toast(`已启动第 ${res.issue} 期流水线`, "success");
+    } catch (e) {
+      toast(friendlyMessage(e, "启动流水线失败"), "error");
+    } finally {
+      setProducing(false);
+    }
+  };
+
+  // 就地轮询流水线状态（每 1.5s），对齐热点线 /topic 轮询逻辑
+  const pollInline = React.useCallback(async (taskId: string) => {
+    try {
+      const st = await api.pipelineStatus(taskId);
+      setTask(st);
+      if (st.status === "success" || st.status === "failed") {
+        setProducePhase(st.status === "success" ? "done" : "form");
+        return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (producePhase !== "running" || !task) return;
+    let active = true;
+    const timer = setInterval(async () => {
+      if (!active) return;
+      const cont = await pollInline(task.task_id);
+      if (!cont) {
+        active = false;
+        clearInterval(timer);
+      }
+    }, 1500);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [producePhase, task, pollInline]);
+
+  // 日志自动滚动到底（用户手动上滚时暂停）
+  React.useEffect(() => {
+    if (autoScroll) logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [task?.logs, autoScroll]);
 
   const handleCopy = async () => {
     if (!current || !currentTitle) return;
@@ -449,6 +566,215 @@ export function DissectPanel({ embedded = false }: { embedded?: boolean }) {
             </TabsContent>
           </Tabs>
 
+          {/* 抖音线后半衔接：候选选题 → 选择并生产 → 就地表单/日志（对齐热点线 /topic 体验） */}
+          {(producePhase === "idle" || producePhase === "form") && (
+            <Card className="mt-5 animate-fade-in">
+              <CardHeader>
+                <CardTitle className="text-base">候选选题（来自抖音拆解 · {rewrites.length} 篇改写）</CardTitle>
+                <CardDescription>
+                  挑一篇直接生产，默认进入「待审核」（审后再发）；也可先存选题库再批量生产。
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {switcherItems.map((it) => {
+                    const Icon = it.icon;
+                    return (
+                      <div
+                        key={it.key}
+                        className={`rounded-lg border p-3 transition ${
+                          pickedKey === it.key
+                            ? "border-primary bg-primary/5"
+                            : "border-border"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 text-xs text-ink-2">
+                          <Icon className="h-4 w-4" />
+                          {it.angleLabel}
+                        </div>
+                        <div className="mt-1.5 line-clamp-2 text-sm font-medium text-ink">
+                          {it.title}
+                        </div>
+                        {it.score != null && (
+                          <Badge variant="muted" className="mt-2">
+                            质量 {it.score}
+                          </Badge>
+                        )}
+                        <Button
+                          size="sm"
+                          className="mt-3 w-full"
+                          disabled={producing}
+                          onClick={() => pickProduce(it.key)}
+                        >
+                          选择并生产
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {producePhase === "form" && (
+                  <div className="rounded-xl border border-border p-4">
+                    <div className="mb-3 text-sm font-medium text-ink">
+                      生产参数（第 {task?.issue ?? "—"} 期将进入「待审核」）
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <Label>选题标题 *</Label>
+                        <Input
+                          value={fTopic}
+                          onChange={(e) => setFTopic(e.target.value)}
+                          placeholder="选题标题"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>切入角度</Label>
+                        <Input
+                          value={fAngle}
+                          onChange={(e) => setFAngle(e.target.value)}
+                          placeholder="切入角度"
+                        />
+                      </div>
+                    </div>
+                    <div className="mt-3 space-y-1">
+                      <Label>补充要求 / 备注</Label>
+                      <Textarea
+                        value={fExtra}
+                        onChange={(e) => setFExtra(e.target.value)}
+                        rows={3}
+                        placeholder="补充要求 / 备注（可选）"
+                      />
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-4">
+                      <label className="flex items-center gap-2 text-sm text-ink">
+                        <input
+                          type="checkbox"
+                          checked={fReview}
+                          onChange={(e) => setFReview(e.target.checked)}
+                          className="h-4 w-4"
+                        />
+                        先存为待审核（推荐：审后再发）
+                      </label>
+                      <span className="text-xs text-ink-2">平台：微信（默认）</span>
+                    </div>
+                    <div className="mt-3 flex gap-2">
+                      <Button onClick={() => startInlineProduce()} disabled={producing}>
+                        {producing ? (
+                          <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Rocket className="mr-1.5 h-4 w-4" />
+                        )}
+                        启动流水线
+                      </Button>
+                      <Button variant="ghost" onClick={() => setProducePhase("idle")}>
+                        取消
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {(producePhase === "running" || producePhase === "done") && task && (
+            <Card className="mt-5 animate-fade-in">
+              <CardHeader>
+                <div className="flex items-center justify-between gap-2">
+                  <CardTitle className="text-base">生产日志 · 第 {task.issue} 期</CardTitle>
+                  <Badge
+                    variant={
+                      task.status === "failed"
+                        ? "destructive"
+                        : task.status === "success"
+                          ? "success"
+                          : "muted"
+                    }
+                  >
+                    {task.status}
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div
+                  ref={logBoxRef}
+                  onScroll={(e) => {
+                    const el = e.currentTarget;
+                    if (el.scrollHeight - el.scrollTop - el.clientHeight > 40) {
+                      setAutoScroll(false);
+                    } else {
+                      setAutoScroll(true);
+                    }
+                  }}
+                  className="max-h-80 overflow-auto rounded-lg border border-border bg-black/40 p-3 font-mono text-xs leading-relaxed"
+                >
+                  {task.logs && task.logs.length > 0 ? (
+                    task.logs.map((line, i) => (
+                      <div
+                        key={i}
+                        className={
+                          /\[error\]|Traceback|错误/.test(line)
+                            ? "whitespace-pre-wrap text-destructive"
+                            : /\[warn\]/.test(line)
+                              ? "whitespace-pre-wrap text-amber-300/90"
+                              : "whitespace-pre-wrap text-emerald-200/90"
+                        }
+                      >
+                        {line}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      等待日志输出…
+                    </div>
+                  )}
+                  <div ref={logEndRef} />
+                </div>
+
+                {task.error && (
+                  <Alert variant="destructive" className="mt-3">
+                    <AlertTitle>执行错误</AlertTitle>
+                    <AlertDescription>{task.error}</AlertDescription>
+                  </Alert>
+                )}
+
+                {producePhase === "done" && task.status === "success" && (
+                  <div className="mt-4 rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-4">
+                    <div className="mb-3 flex flex-wrap items-center gap-2">
+                      <Badge variant="success">
+                        <CheckCircle2 className="mr-1 h-3 w-3" />
+                        已进入待审核 · 第 {task.issue} 期
+                      </Badge>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button onClick={() => router.push("/tasks?review=1")}>
+                        <CheckCircle2 className="mr-1.5 h-4 w-4" />
+                        去审核发布
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() => {
+                          setProducePhase("idle");
+                          setTask(null);
+                        }}
+                      >
+                        返回
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {producePhase === "done" && task.status === "failed" && (
+                  <div className="mt-4 flex gap-2">
+                    <Button variant="outline" onClick={() => setProducePhase("form")}>
+                      返回修改
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           <div className="sticky bottom-4 z-10 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-subtle bg-surface/95 p-3 shadow-lg backdrop-blur">
             <div className="text-xs text-ink-2">
               当前操作：
@@ -480,7 +806,7 @@ export function DissectPanel({ embedded = false }: { embedded?: boolean }) {
                 <Copy className="mr-1.5 h-4 w-4" />
                 复制文案
               </Button>
-              <Button onClick={handleProduce}>
+              <Button onClick={handleProduce} disabled={producePhase === "running" || producing}>
                 <Rocket className="mr-1.5 h-4 w-4" />
                 直接生产
               </Button>
