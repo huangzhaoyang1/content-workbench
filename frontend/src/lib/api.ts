@@ -34,6 +34,7 @@ import type {
   DissectAnalyzeResult,
   DissectAnalyzeReq,
   DissectFetchResult,
+  DissectTranscribeResult,
   DissectRewriteOneReq,
   DissectRewriteOneResult,
   DissectSaveTopicReq,
@@ -497,6 +498,12 @@ export const api = {
   /** 只抓取不拆解：拿到结构化文案后先给用户预览 / 编辑 */
   dissectFetch: (url: string) =>
     request<DissectFetchResult>("/api/douyin-dissect/fetch", {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    }),
+  /** 把抖音视频音频转写成完整口播稿（页面文本太短时自动兜底） */
+  dissectTranscribe: (url: string) =>
+    request<DissectTranscribeResult>("/api/douyin-dissect/transcribe", {
       method: "POST",
       body: JSON.stringify({ url }),
     }),

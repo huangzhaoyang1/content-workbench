@@ -373,7 +373,12 @@ export function DissectPanel({ embedded = false }: { embedded?: boolean }) {
 
           <div className="flex flex-wrap items-center gap-2 text-xs text-ink-2">
             <Badge variant="muted">
-              来源：{result.source.origin === "url" ? "抖音链接" : "手动粘贴"}
+              来源：
+              {result.source.origin === "transcribe"
+                ? "视频转写"
+                : result.source.origin === "url"
+                ? "抖音链接"
+                : "手动粘贴"}
             </Badge>
             {result.source.complete === false && (
               <Badge variant="warning">内容可能不完整</Badge>

@@ -703,7 +703,7 @@ export interface DissectStats {
 
 /** 抖音链接抓取到的结构化信息（抓不到的字段保留 key，值为空） */
 export interface DissectSource {
-  origin: "manual" | "url";
+  origin: "manual" | "url" | "transcribe";
   url: string;
   note: string;
   complete?: boolean;
@@ -728,6 +728,17 @@ export interface DissectFetchResult {
   hints: string[];
   note: string;
   complete: boolean;
+}
+
+/** POST /api/douyin-dissect/transcribe —— 视频音频 → 文字（Whisper） */
+export interface DissectTranscribeResult {
+  ok: boolean;
+  text?: string;
+  duration_sec?: number | null;
+  engine?: string;
+  model?: string;
+  /** 失败原因（下载失败 / 超时 / 无声 等），ok=false 时一定有 */
+  error?: string;
 }
 
 export interface DissectAnalyzeResult {

@@ -207,6 +207,10 @@ _MANUAL_HINT = (
 # 链接抓取通常只能拿到标题/简介（几十字），拆不出案例和数据。
 # 低于这个字数就明确告诉用户「内容不完整」，而不是让他拿着一份空拆解发懵。
 _INCOMPLETE_THRESHOLD = 200
+
+# 抓取到的文字少于这个字数（说明只拿到简介），拆解流程会自动尝试
+# 用 Whisper 把视频音频转写成完整口播稿（三层兜底的「视频转写」层）。
+_TRANSCRIBE_TRIGGER_MAX_CHARS = 100
 _INCOMPLETE_WARN = (
     "⚠️ 抓取到的内容不完整（只拿到 {n} 字，大概率是标题/简介，不是完整口播文案）。"
     "这种情况下拆不出具体案例和数据，改写出来的文章会很空。"
@@ -499,6 +503,28 @@ def fetch_douyin(raw_url: str) -> dict:
 def fetch_douyin_text(raw_url: str) -> dict:
     """兼容旧调用方：只要 {text, title, source_url, complete, note}。"""
     return fetch_douyin(raw_url)
+
+
+def transcribe_video_url(url: str) -> dict:
+    """拆解流程的「视频转写」兜底：把抖音链接转写成完整口播稿。
+
+    这是三层兜底里的第 2 层（第 1 层是页面文本，第 3 层是手动粘贴）。
+    实际转写由 services/data/transcribe.py 完成（yt-dlp + whisper，CPU 模式）。
+
+    返回 {ok, text, duration_sec, engine, model, error?}。
+    失败 / 超时都返回 ok=False + 中文原因，前端据此引导用户手动粘贴。
+    """
+    from ..data.transcribe import transcribe_video
+
+    if not (url or "").strip():
+        return {
+            "ok": False,
+            "text": "",
+            "duration_sec": None,
+            "engine": "whisper",
+            "error": "缺少抖音链接",
+        }
+    return transcribe_video(url)
 
 
 # ---------------------------------------------------------------------------
@@ -852,6 +878,10 @@ def _merge_meta(source: dict[str, Any], meta: Any) -> dict[str, Any]:
         source["missing"] = list(meta["missing"])[:12]
     if meta.get("url") and not source.get("url"):
         source["url"] = meta["url"]
+    # 前端把「视频转写」结果标成 transcribe，这里要能透传进最终 source，
+    # 拆解结果徽章才能正确显示「素材来源=视频转写」。
+    if meta.get("origin") in ("url", "manual", "transcribe"):
+        source["origin"] = meta["origin"]
     return source
 
 
@@ -869,6 +899,12 @@ def fetch_preview(url: str) -> dict:
         hints.append(
             f"只抓到 {len(text)} 个字，多半是简介而不是完整口播稿。"
             "建议打开视频、开字幕手动复制完整文案后粘贴到下面的框里再拆解。"
+        )
+    if len(text) < _TRANSCRIBE_TRIGGER_MAX_CHARS:
+        hints.append(
+            f"文字少于 {_TRANSCRIBE_TRIGGER_MAX_CHARS} 字，不足以直接拆解。"
+            "系统会自动尝试把视频音频转写成完整口播稿（约 5–15 分钟，CPU 模式）；"
+            "若转写失败，你也可以打开抖音开字幕，把完整口播稿手动粘贴进来。"
         )
     return {
         "text": text,

@@ -30,6 +30,7 @@ import {
   TabsContent,
 } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
 import type { DissectFetchResult, DissectSource } from "@/lib/types";
 
 export interface DissectInputValue {
@@ -110,14 +111,28 @@ export function InputSection({
   const [fetched, setFetched] = React.useState<DissectFetchResult | null>(null);
   const [draft, setDraft] = React.useState("");
 
+  // 自动转写态（页面文本太短时触发，非阻塞页面）
+  const [transcribing, setTranscribing] = React.useState(false);
+  const [transcribeError, setTranscribeError] = React.useState<string | null>(null);
+  const [transcribed, setTranscribed] = React.useState(false);
+
   const handleFetch = async () => {
     if (!onFetch || !url.trim()) return;
     setUrlError(null);
     setFetching(true);
+    // 新一轮抓取：清掉上一次的转写态
+    setTranscribing(false);
+    setTranscribeError(null);
+    setTranscribed(false);
     try {
       const res = await onFetch(url.trim());
       setFetched(res);
       setDraft(res.text ?? "");
+      // 抓到的文字太少（<100 字，多半只是简介）→ 自动尝试把视频音频转写成口播稿。
+      // 这是后台长任务（约 5–15 分钟），用 fire-and-forget 触发，不冻结页面。
+      if ((res.text ?? "").trim().length < 100) {
+        void runTranscribe(url.trim());
+      }
     } catch (e) {
       setFetched(null);
       setUrlError(
@@ -128,10 +143,34 @@ export function InputSection({
     }
   };
 
+  /** 调用后端 Whisper 转写接口，把视频音频转成完整口播稿。 */
+  const runTranscribe = async (u: string) => {
+    setTranscribing(true);
+    setTranscribeError(null);
+    try {
+      const r = await api.dissectTranscribe(u);
+      if (r.ok && r.text) {
+        setDraft(r.text);
+        setTranscribed(true);
+      } else {
+        setTranscribeError(r.error || "转写失败，原因未知");
+      }
+    } catch (e) {
+      setTranscribeError(
+        e instanceof Error ? e.message : "转写请求失败，请稍后重试"
+      );
+    } finally {
+      setTranscribing(false);
+    }
+  };
+
   const resetFetch = () => {
     setFetched(null);
     setDraft("");
     setUrlError(null);
+    setTranscribing(false);
+    setTranscribeError(null);
+    setTranscribed(false);
   };
 
   const handleSubmit = () => {
@@ -141,10 +180,16 @@ export function InputSection({
         void handleFetch();
         return;
       }
+      // 若这一步的文案来自视频转写，把素材来源标记为 transcribe，
+      // 后端 analyze 会透传到结果徽章「视频转写」。
+      const meta =
+        fetched.source && transcribed
+          ? { ...fetched.source, origin: "transcribe" as const }
+          : (fetched.source ?? null);
       onSubmit({
         url: url.trim(),
         text: draft.trim(),
-        meta: fetched.source ?? null,
+        meta,
       });
       return;
     }
@@ -326,10 +371,43 @@ export function InputSection({
                   </Alert>
                 )}
 
+                {/* 自动转写进度 / 失败引导（页面文本太短时触发） */}
+                {transcribing && (
+                  <div className="flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 p-3 text-xs leading-relaxed text-ink">
+                    <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary" />
+                    <div>
+                      正在转写视频内容…（约 5–15 分钟，CPU 模式）
+                      <div className="mt-0.5 text-ink-2">
+                        先把视频音频拉下来再用 Whisper 转成文字，完成后会自动填进口播文案框；你也可以直接手动粘贴。
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {!transcribing && transcribeError && (
+                  <Alert variant="warning">
+                    <AlertDescription>
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                        <div className="space-y-1 text-xs leading-relaxed">
+                          <div>视频转写失败：{transcribeError}</div>
+                          <div>
+                            建议打开抖音 App，开字幕把完整口播稿复制粘贴到下面的框里再拆解；手动粘贴的文案最完整，拆解质量最高。
+                          </div>
+                        </div>
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                )}
+
                 {/* 可编辑文案 */}
                 <div className="space-y-2">
                   <Label htmlFor="dy-draft" required>
                     口播文案（可直接编辑，确认后再拆解）
+                    {transcribed && (
+                      <Badge variant="success" className="ml-2">
+                        视频转写
+                      </Badge>
+                    )}
                   </Label>
                   <Textarea
                     id="dy-draft"

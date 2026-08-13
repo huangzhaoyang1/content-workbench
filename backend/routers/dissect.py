@@ -40,6 +40,24 @@ def fetch(body: FetchReq) -> dict:
         raise HTTPException(status_code=e.status_code, detail=str(e))
 
 
+class TranscribeReq(BaseModel):
+    url: str = Field("", description="抖音分享链接 / 短链 / 带口令的整段分享文本")
+
+
+@router.post("/douyin-dissect/transcribe")
+def transcribe(body: TranscribeReq) -> dict:
+    """把抖音视频音频转写成完整口播稿（yt-dlp + Whisper，CPU 模式）。
+
+    这是「页面文本太短」时的自动兜底：抓取只拿到简介时，前端会自动调这个接口，
+    把视频音频转写成文字作为拆解素材。接口会阻塞到转写完成（最长 20 分钟），
+    前端用「正在转写…」进度提示承接，不冻结页面。
+
+    返回 {ok, text, duration_sec, engine, model, error?}；
+    失败时 ok=False 且带中文原因（下载失败 / 超时 / 无声），前端据此引导手动粘贴。
+    """
+    return dissect.transcribe_video_url(body.url or "")
+
+
 class AnalyzeReq(BaseModel):
     url: str = Field("", description="抖音分享链接，与 text 二选一")
     text: str = Field("", description="抖音视频文案 / 口播稿，优先于 url")
