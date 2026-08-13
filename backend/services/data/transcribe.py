@@ -24,14 +24,17 @@ from typing import Any
 
 log = logging.getLogger("workbench.transcribe")
 
-# 视频时长上限：超过就不转写了（CPU 转写太慢、性价比低）
-_MAX_DURATION_SEC = 600  # 10 分钟
-# 整体超时（下载 + 转码 + 转写）：超过返回「转写超时，建议手动粘贴」
-_OVERALL_TIMEOUT_SEC = 1200  # 20 分钟
+# 视频时长上限：超过就不再自动转写（CPU 转写太慢、性价比低）
+# 注意：之前是 600（10 分钟），15 分钟视频会被本参数直接拒掉——这正是用户当前痛点。
+# 提到 1800（30 分钟），并允许调用方用 transcribe_video(..., max_duration=...) 覆盖。
+_MAX_DURATION_SEC = 1800  # 30 分钟
+# 整体超时（下载 + 转码 + 转写）：超过返回「转写超时，建议手动粘贴」。
+# 长视频 CPU 转写本来就慢（15 分钟视频可能 20-30 分钟），提到 40 分钟。
+_OVERALL_TIMEOUT_SEC = 2400  # 40 分钟
 # 下载音频单独超时
-_DOWNLOAD_TIMEOUT_SEC = 300
+_DOWNLOAD_TIMEOUT_SEC = 600  # 抖音下载慢（cookie + 重定向），10 分钟起步
 # 转码单独超时
-_CONVERT_TIMEOUT_SEC = 180
+_CONVERT_TIMEOUT_SEC = 300
 # whisper 默认模型（中文 small 够用；medium 质量更好但更慢；base 作兜底）
 _DEFAULT_MODEL = "small"
 _FALLBACK_MODEL = "base"
@@ -358,7 +361,7 @@ def transcribe_video(
                 "engine": "whisper",
                 "error_key": "too_long",
                 "error": (
-                    f"视频时长约 {int(dur // 60)} 分，超过 10 分钟上限，"
+                    f"视频时长约 {int(dur // 60)} 分，超过 {_MAX_DURATION_SEC // 60} 分钟上限，"
                     "转写成本太高，建议手动粘贴完整口播稿。"
                 ),
             }

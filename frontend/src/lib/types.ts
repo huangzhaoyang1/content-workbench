@@ -728,6 +728,8 @@ export interface DissectFetchResult {
   hints: string[];
   note: string;
   complete: boolean;
+  /** 视频时长（秒），用来决定是否要触发自动转写。抓不到时为 null。 */
+  duration_sec?: number | null;
 }
 
 /** POST /api/douyin-dissect/transcribe —— 视频音频 → 文字（Whisper） */

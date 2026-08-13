@@ -205,16 +205,58 @@ _MANUAL_HINT = (
 )
 
 # 链接抓取通常只能拿到标题/简介（几十字），拆不出案例和数据。
-# 低于这个字数就明确告诉用户「内容不完整」，而不是让他拿着一份空拆解发懵。
-_INCOMPLETE_THRESHOLD = 200
+# 但「不完整提示阈值」是**时长感知**的——短视频简介就能覆盖全部内容，
+# 长视频简介却只有完整口播的 1/10。我们用视频时长（秒）×3.5（中文口播约 3-4 字/秒）
+# 估算应有字数，再取 20% 作为阈值。这样：
+#   - 30 秒短视频   expected≈105 → threshold=max(300,21)=300；200字简介达标（合理）
+#   - 15 分钟视频   expected≈3150 → threshold=630；简介 188 字会触发转写（符合本轮修复目标）
+# 看不到 duration_sec（极端情况）时退回保守值 300。
+_INCOMPLETE_RATIO = 0.2
+_INCOMPLETE_MIN_CHARS = 300
 
-# 抓取到的文字少于这个字数（说明只拿到简介），拆解流程会自动尝试
-# 用 Whisper 把视频音频转写成完整口播稿（三层兜底的「视频转写」层）。
-_TRANSCRIBE_TRIGGER_MAX_CHARS = 100
+
+def _expected_chars(duration_sec) -> int:
+    """根据视频时长估算「应有口播稿字数」。中文口播按 3.5 字/秒。"""
+    if duration_sec and duration_sec > 0:
+        return int(duration_sec * 3.5)
+    return 0
+
+
+def _incomplete_threshold_chars(duration_sec) -> int:
+    """简介不完整的触发阈值：expected * 0.2 但不少于 300。"""
+    exp = _expected_chars(duration_sec)
+    if exp <= 0:
+        return _INCOMPLETE_MIN_CHARS
+    return max(_INCOMPLETE_MIN_CHARS, int(exp * _INCOMPLETE_RATIO))
+
+
+def _should_trigger_transcribe(text: str, duration_sec=None) -> bool:
+    """是否要自动触发视频转写：抓到的文字明显少于应有口播稿字数时返回 True。
+
+    适用场景：抖音链接抓取通常只返回视频简介（几十~几百字），长视频那点简介
+    完全没法拆出案例和数据，触发 Whisper 自动转写给出完整口播稿。
+    """
+    n = len((text or "").strip())
+    return n < _incomplete_threshold_chars(duration_sec)
+
+
+def _is_incomplete_fetch(text: str, duration_sec=None) -> bool:
+    """抓到的文案是否看起来不像完整口播稿（只是简介）。
+
+    阈值比触发转写略宽——字数 < expected * 0.4 时就该给「内容不完整」警告。
+    """
+    n = len((text or "").strip())
+    exp = _expected_chars(duration_sec)
+    if exp <= 0:
+        # 拿不到时长退保守：< 1000 字就算不完整
+        return n < 1000
+    return n < int(exp * 0.4)
+
+
 _INCOMPLETE_WARN = (
-    "⚠️ 抓取到的内容不完整（只拿到 {n} 字，大概率是标题/简介，不是完整口播文案）。"
+    "⚠️ 抓取到的内容不完整（只拿到 {n} 字，预期约 {exp} 字）。"
     "这种情况下拆不出具体案例和数据，改写出来的文章会很空。"
-    "强烈建议改用「手动粘贴」：把视频完整文案贴进来重跑一次。"
+    "建议让系统自动转写视频，或改用「手动粘贴」：把视频完整文案贴进来重跑一次。"
 )
 
 
@@ -513,7 +555,7 @@ def fetch_douyin(raw_url: str) -> dict:
         )
         if not v
     ]
-    complete = len(text) >= _INCOMPLETE_THRESHOLD
+    complete = not _is_incomplete_fetch(text, duration_sec)
     if not complete:
         missing.insert(0, _FIELD_LABELS["text"])
 
@@ -948,26 +990,36 @@ def fetch_preview(url: str) -> dict:
     fetched = fetch_douyin(url)
     source = source_from_fetch(fetched)
     text = fetched.get("text") or ""
+    duration_sec = fetched.get("duration_sec")
     hints: list[str] = []
     if fetched.get("missing"):
         hints.append("没抓到：" + "、".join(fetched["missing"][:6]))
-    if len(text) < 200:
+    if _is_incomplete_fetch(text, duration_sec):
+        exp = _expected_chars(duration_sec)
         hints.append(
-            f"只抓到 {len(text)} 个字，多半是简介而不是完整口播稿。"
-            "建议打开视频、开字幕手动复制完整文案后粘贴到下面的框里再拆解。"
+            _INCOMPLETE_WARN.format(
+                n=len(text),
+                exp=exp if exp > 0 else len(text) * 5,  # 退化给个直观倍数
+            )
         )
-    if len(text) < _TRANSCRIBE_TRIGGER_MAX_CHARS:
-        hints.append(
-            f"文字少于 {_TRANSCRIBE_TRIGGER_MAX_CHARS} 字，不足以直接拆解。"
-            "系统会自动尝试把视频音频转写成完整口播稿（约 5–15 分钟，CPU 模式）；"
+    if _should_trigger_transcribe(text, duration_sec):
+        exp = _expected_chars(duration_sec)
+        mins = max(5, (exp // 3)) // 60 or 5
+        hint = (
+            f"文字 {len(text)} 字，远少于预期口播稿（{exp} 字）。"
+            "系统会自动尝试把视频音频转写成完整口播稿（约 5–30 分钟，CPU 模式）；"
             "若转写失败，你也可以打开抖音开字幕，把完整口播稿手动粘贴进来。"
         )
+        hints.append(hint)
     return {
         "text": text,
         "source": source,
         "hints": hints,
         "note": fetched.get("note") or "",
         "complete": bool(fetched.get("complete", False)),
+        # 给前端用于时长感知 trigger 判定
+        "duration_sec": duration_sec,
+        "video_id": fetched.get("video_id") or "",
     }
 
 

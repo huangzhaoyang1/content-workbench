@@ -155,9 +155,16 @@ export function InputSection({
       const res = await onFetch(url.trim());
       setFetched(res);
       setDraft(res.text ?? "");
-      // 抓到的文字太少（<100 字，多半只是简介）→ 自动尝试把视频音频转写成口播稿。
-      // 这是后台长任务（约 5–15 分钟），用 fire-and-forget 触发，不冻结页面。
-      if ((res.text ?? "").trim().length < 100) {
+      // 时长感知的「是否要自动转写」判定，和后端 dissect._should_trigger_transcribe 行为一致：
+      //   - 中文口播按 3.5 字/秒估算应有字数；
+      //   - 抓到的字数 < max(300, expected * 0.2) 时触发 Whisper 转写。
+      //   - 15 分钟视频（900s）阈值约 630 字，188 字简介会被触发（核心修复目标）；
+      //   - 30 秒短视频阈值约 300 字，简介 200 字不会误触发。
+      // 是后台长任务（约 5–30 分钟），用 fire-and-forget 触发，不冻结页面。
+      const dur = res.duration_sec ?? 0;
+      const expected = dur > 0 ? Math.round(dur * 3.5) : 0;
+      const threshold = Math.max(300, expected > 0 ? Math.round(expected * 0.2) : 300);
+      if (((res.text ?? "").trim().length < threshold) && dur > 0) {
         void runTranscribe(url.trim());
       }
     } catch (e) {
@@ -424,7 +431,7 @@ export function InputSection({
                   <div className="flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 p-3 text-xs leading-relaxed text-ink">
                     <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary" />
                     <div>
-                      正在转写视频内容…（约 5–15 分钟，CPU 模式）
+                      正在转写视频内容…（约 5–30 分钟，CPU 模式）
                       <div className="mt-0.5 text-ink-2">
                         先把视频音频拉下来再用 Whisper 转成文字，完成后会自动填进口播文案框；你也可以直接手动粘贴。
                       </div>
