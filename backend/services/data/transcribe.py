@@ -98,8 +98,27 @@ def _classify_yt_dlp_error(msg: str) -> tuple[str, str]:
 
 
 def _ytdl_common_opts(extra: dict | None = None) -> dict:
-    """yt-dlp 的通用下载器配置：UA、Referer、可选 cookies 文件。"""
-    opts = {
+    """yt-dlp 的通用下载器配置：UA、Referer、cookie。
+
+    cookie 来源（统一由 .douyin_cookie 解析，按优先级自动选模式 → 统一落到 cookiefile）：
+      1) backend/data/douyin_sync.json -> config.cookie（UI 粘的浏览器 Cookie 头）
+         → 写到 temp Netscape 文件 → yt-dlp ``cookiefile``
+      2) 环境变量 ASR_DOUYIN_COOKIES 指向的 Netscape cookies 文件
+         → 直接 ``cookiefile`` 给 yt-dlp
+
+    ⚠ 不直接用 ``http_headers["Cookie"]``：yt-dlp 把这条标为 deprecated，
+    且抖音对这种请求高频判 "Fresh cookies are needed"。最稳的路径就是把
+    Cookie 头解析后写 Netscape 文件 → cookiefile（与 .bat 注入的旧路径对齐）。
+
+    没配 cookie 也不报错——调用方 transcribe_video() 会先做 fail-fast 拦截，
+    不会发起注定失败的下载。
+    """
+    from .douyin_cookie import (
+        header_to_netscape_file,
+        resolve_douyin_cookie,
+    )
+
+    opts: dict = {
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
@@ -111,12 +130,20 @@ def _ytdl_common_opts(extra: dict | None = None) -> dict:
             "Referer": "https://www.douyin.com/",
         },
     }
-    # cookies 文件：env 配 ASR_DOUYIN_COOKIES=/abs/path/to/cookies.txt
-    # 文件不存在或读取失败 → 静默忽略（让调用方按需报错）
-    import os
-    ck = os.environ.get("ASR_DOUYIN_COOKIES", "").strip()
-    if ck and os.path.isfile(ck):
-        opts["cookiefile"] = ck
+    ck = resolve_douyin_cookie()
+    mode = ck.get("mode")
+    if mode == "header":
+        try:
+            ck_path = header_to_netscape_file(ck.get("header_value") or "")
+            opts["cookiefile"] = ck_path
+            log.info("[transcribe] cookie via netscape tmpfile=%s (src=%s, len=%d)",
+                     ck_path, ck.get("name"), ck.get("length", 0))
+        except Exception as e:  # noqa: BLE001
+            log.warning("[transcribe] cookie 字符串转 Netscape 文件失败：%s", e)
+    elif mode == "cookiefile":
+        opts["cookiefile"] = ck.get("cookiefile") or ""
+        log.info("[transcribe] cookie via cookiefile=%s (src=%s)",
+                 opts["cookiefile"], ck.get("name"))
     if extra:
         opts.update(extra)
     return opts
@@ -344,6 +371,24 @@ def transcribe_video(
             "engine": "whisper",
             "error_key": "invalid_input",
             "error": "缺少视频链接或 id",
+        }
+
+    # ---- 抖音 / TikTok 必带 cookie：没配就直接拒绝下载，不浪费 20 分钟转写 ----
+    from .douyin_cookie import resolve_douyin_cookie
+
+    ck = resolve_douyin_cookie()
+    if not ck.get("mode"):
+        return {
+            "ok": False,
+            "text": "",
+            "duration_sec": None,
+            "engine": "whisper",
+            "error_key": "need_login",
+            "error": (
+                "这条视频需要登录态才能下载（抖音 / TikTok 等平台对未登录请求直接拒绝）。"
+                "请到「抖音同步」页 → 「配置」标签 → 「抖音登录 Cookie」粘贴你浏览器里的 Cookie 后保存，"
+                "然后回这里再点一次「自动转写」。"
+            ),
         }
 
     workdir = Path(tempfile.mkdtemp(prefix="asr_"))

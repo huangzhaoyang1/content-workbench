@@ -447,6 +447,10 @@ def _http_get(url: str, *, mobile: bool = True, timeout: int = 15):
     import os
     import requests
     import urllib3  # 懒加载
+    from ..data.douyin_cookie import (
+        parse_cookie_header_for_requests,
+        resolve_douyin_cookie,
+    )
 
     headers = {
         "User-Agent": _UA_MOBILE if mobile else _UA_DESKTOP,
@@ -460,13 +464,22 @@ def _http_get(url: str, *, mobile: bool = True, timeout: int = 15):
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     # 带 cookie：抖音对未登录的抓取直接返回验证页/空 HTML。
-    # cookies 文件路径由启动 AI内容工作台.bat 自动从 C:\Users\黄朝扬\douyin_cookies.txt 检测 + 注入。
+    # 双路径（统一交给 .data.douyin_cookie 探测）：
+    #   ①AI内容工作台.bat 注入的 Netscape cookies.txt (env ASR_DOUYIN_COOKIES)
+    #   ②前端「抖音同步」页「抖音登录 Cookie」输入框 → douyin_sync.json 字符串
     cookies: dict[str, str] = {}
-    cookie_path = os.environ.get("ASR_DOUYIN_COOKIES", "").strip()
-    if cookie_path and os.path.isfile(cookie_path):
-        cookies = _load_netscape_cookies(cookie_path)
+    ck = resolve_douyin_cookie()
+    mode = ck.get("mode")
+    if mode == "header":
+        cookies = parse_cookie_header_for_requests(ck.get("header_value") or "")
         if cookies:
-            log.info("[dissect] 已加载 %d 条 douyin cookies（%s）", len(cookies), cookie_path)
+            log.info("[dissect] 已加载 %d 条 douyin cookies（src=%s, len=%d）",
+                     len(cookies), ck.get("name"), ck.get("length", 0))
+    elif mode == "cookiefile":
+        cookies = _load_netscape_cookies(ck.get("cookiefile") or "")
+        if cookies:
+            log.info("[dissect] 已加载 %d 条 douyin cookies（src=%s, file=%s）",
+                     len(cookies), ck.get("name"), ck.get("cookiefile"))
 
     return requests.get(
         url,
@@ -500,14 +513,18 @@ def _ytdlp_extract_douyin(raw_url: str) -> dict | None:
     字段抓不到的填 "" 或 None。
 
     返回 None 的情况（不抛异常，调用方继续走 requests+regex 兜底）：
-        - ASR_DOUYIN_COOKIES 未配置（yt-dlp 对 douyin 必须带 cookie）
+        - douyin cookie 未配置（yt-dlp 对 douyin 必须带 cookie）
         - 任何 yt-dlp 解析失败（短链失效、视频私密、反爬、网络错误等）
     """
-    import os
+    from ..data.douyin_cookie import (
+        header_to_netscape_file,
+        resolve_douyin_cookie,
+    )
 
-    cookie_path = os.environ.get("ASR_DOUYIN_COOKIES", "").strip()
-    if not cookie_path or not os.path.isfile(cookie_path):
-        log.debug("[dissect] ASR_DOUYIN_COOKIES 未配置，跳过 yt-dlp 路径")
+    ck = resolve_douyin_cookie()
+    mode = ck.get("mode")
+    if not mode:
+        log.debug("[dissect] 未配置 douyin cookie，跳过 yt-dlp 路径")
         return None
 
     try:
@@ -518,13 +535,14 @@ def _ytdlp_extract_douyin(raw_url: str) -> dict | None:
 
     # 与 services/data/transcribe.py 的 _ytdl_common_opts 保持一致；
     # 抖音需要 Referer 才能拿到视频页，否则会被反爬截到首页。
+    # ⚠ 不直接用 --add-header "Cookie: ..."：yt-dlp deprecated + 抖音对这种请求
+    # 高频判 Fresh cookies；统一先把 cookie 字符串写 Netscape 临时文件再 cookiefile。
     ydl_opts = {
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
         "skip_download": True,
         "extract_flat": False,
-        "cookiefile": cookie_path,
         "http_headers": {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -533,6 +551,19 @@ def _ytdlp_extract_douyin(raw_url: str) -> dict | None:
             "Referer": "https://www.douyin.com/",
         },
     }
+    if mode == "header":
+        try:
+            ck_path = header_to_netscape_file(ck.get("header_value") or "")
+            ydl_opts["cookiefile"] = ck_path
+            log.info("[dissect] cookie via netscape tmpfile=%s (src=%s, len=%d)",
+                     ck_path, ck.get("name"), ck.get("length", 0))
+        except Exception as e:  # noqa: BLE001
+            log.warning("[dissect] cookie 字符串转 Netscape 文件失败：%s", e)
+            return None
+    else:  # cookiefile
+        ydl_opts["cookiefile"] = ck.get("cookiefile") or ""
+        log.info("[dissect] cookie via cookiefile=%s (src=%s)",
+                 ydl_opts["cookiefile"], ck.get("name"))
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:

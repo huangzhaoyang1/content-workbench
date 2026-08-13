@@ -241,6 +241,7 @@ export default function DouyinSyncPage() {
       };
       if (cookieDraft.trim()) payload.cookie = cookieDraft.trim();
       const saved = await api.douyinSyncSaveConfig(payload);
+      const savedCookie = !!saved.cookie_set;
       setState((s) => (s ? { ...s, config: saved } : s));
       setCfg({
         enabled: saved.enabled,
@@ -254,7 +255,27 @@ export default function DouyinSyncPage() {
       });
       setCookieDraft("");
       setDirtyCfg(false);
-      toast("配置已保存", "success");
+      // 区分 toast：保存了 cookie → 给引导跳回拆解；普通配置保存 → 一句话。
+      if (savedCookie) {
+        toast("Cookie 已保存，现在可以回去拆解视频了", {
+          type: "success",
+          action: {
+            label: "去拆解视频",
+            // 优先切到本页的「即时拆解」outer tab（不离开页面），
+            // 用 router 作为兜底（页面销毁也能跳过去）
+            onClick: () => {
+              try {
+                setOuterTab("dissect");
+              } catch {
+                /* noop */
+              }
+              router.push("/dissect");
+            },
+          },
+        });
+      } else {
+        toast("配置已保存", "success");
+      }
     } catch (e) {
       toast(friendlyMessage(e, "保存配置失败"), "error");
     } finally {
@@ -615,22 +636,87 @@ export default function DouyinSyncPage() {
                   </div>
 
                   {/* Cookie */}
-                  <div>
-                    <Label className="text-sm font-medium">抖音登录 Cookie（选填，提高成功率）</Label>
+                  <div className="space-y-2 rounded-lg border border-border p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="text-sm font-medium">
+                        抖音登录 Cookie
+                        <span className="ml-2 text-xs font-normal text-muted-foreground">
+                          （选填，不配也能用，配了抓取/转写成功率大幅提升）
+                        </span>
+                      </Label>
+                      {config?.cookie_set ? (
+                        <Badge variant="success">已保存</Badge>
+                      ) : (
+                        <Badge variant="muted">未配置</Badge>
+                      )}
+                    </div>
                     <Textarea
                       value={cookieDraft}
                       placeholder={
-                        config?.cookie_set ? "已配置 Cookie，留空表示不修改；要更新就粘贴新的" : "粘贴浏览器里抖音的 Cookie（在 DevTools → Network → 任意请求 → Request Headers 复制）"
+                        config?.cookie_set
+                          ? "已配置 Cookie；留空表示不修改，要更新就粘贴新的"
+                          : "ttwid=abc...; sessionid=xyz...; odin_tt=...; ..."
                       }
-                      rows={2}
+                      rows={3}
+                      className="font-mono text-xs"
                       onChange={(e) => {
                         setCookieDraft(e.target.value);
                         setDirtyCfg(true);
                       }}
                     />
-                    {config?.cookie_set && (
-                      <p className="mt-1 text-xs text-success">✓ 已保存 Cookie（出于安全不回传明文）</p>
-                    )}
+                    <p className="text-xs text-muted-foreground">
+                      出于安全，保存后前端只回传「是否已配置」状态，不回传明文；失效时需重新粘贴。
+                    </p>
+                    {/* 5 步式引导（核心解决「用户不会复制 Cookie」的卡点） */}
+                    <details className="group rounded-md bg-muted/50">
+                      <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-foreground">
+                        如何获取抖音 Cookie？点开看 5 步走
+                      </summary>
+                      <ol className="space-y-1.5 px-3 pb-3 pl-7 pt-1 text-xs text-muted-foreground">
+                        <li>
+                          <span className="font-semibold text-foreground">①</span>{" "}
+                          Chrome / Edge 浏览器打开{" "}
+                          <a
+                            href="https://www.douyin.com"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-primary underline underline-offset-2"
+                          >
+                            https://www.douyin.com
+                          </a>{" "}
+                          并登录你自己的账号
+                        </li>
+                        <li>
+                          <span className="font-semibold text-foreground">②</span>{" "}
+                          按 <kbd className="rounded border bg-background px-1">F12</kbd>{" "}
+                          打开「开发者工具」，切到{" "}
+                          <span className="font-medium text-foreground">Network（网络）</span>{" "}
+                          标签
+                        </li>
+                        <li>
+                          <span className="font-semibold text-foreground">③</span>{" "}
+                          刷新页面（<kbd className="rounded border bg-background px-1">F5</kbd>），
+                          点击列表里第一个请求（如 aweme / www.douyin.com）
+                        </li>
+                        <li>
+                          <span className="font-semibold text-foreground">④</span>{" "}
+                          在右侧{" "}
+                          <span className="font-medium text-foreground">Request Headers（请求头）</span>{" "}
+                          里找到 <code className="rounded bg-background px-1">cookie:</code>{" "}
+                          那一整行，<span className="font-semibold text-foreground">只复制冒号后面的值</span>
+                        </li>
+                        <li>
+                          <span className="font-semibold text-foreground">⑤</span>{" "}
+                          粘贴到上方文本框 → 滚到页面底部点「保存配置」→ 看到
+                          <span className="font-medium text-foreground">「Cookie 已保存」</span>
+                          后即可去「即时拆解」自动转写视频
+                        </li>
+                      </ol>
+                      <p className="px-3 pb-3 text-[11px] text-muted-foreground">
+                        Cookie 一般几小时到几天会过期；只要「即时拆解」又开始频繁报「需要登录态」，
+                        重新来一次这 5 步就行。
+                      </p>
+                    </details>
                   </div>
 
                   {/* 筛选 */}

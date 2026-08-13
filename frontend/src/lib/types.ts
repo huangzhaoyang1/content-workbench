@@ -746,7 +746,7 @@ export interface DissectTranscribeResult {
    * - unsupported     链接不被识别或平台不支持
    * - format          视频格式不支持
    * - timeout         下载或转写超时
-   * - too_long        超过 10 分钟上限
+   * - too_long        超过 30 分钟上限（_MAX_DURATION_SEC）
    * - transcribe_failed whisper 自身失败
    * - invalid_input   缺少链接
    * - unknown         其它（参考 error 字符串）

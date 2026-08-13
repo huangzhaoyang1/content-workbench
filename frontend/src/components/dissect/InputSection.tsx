@@ -16,7 +16,9 @@ import {
   User,
   CalendarClock,
   Hash,
+  Cookie,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,7 +33,11 @@ import {
 } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
-import type { DissectFetchResult, DissectSource } from "@/lib/types";
+import type {
+  DissectFetchResult,
+  DissectSource,
+  DissectTranscribeResult,
+} from "@/lib/types";
 
 export interface DissectInputValue {
   url: string;
@@ -125,6 +131,7 @@ export function InputSection({
   onSubmit,
   onFetch,
 }: InputSectionProps) {
+  const router = useRouter();
   const [tab, setTab] = React.useState<"url" | "text">(defaultTab);
   const [url, setUrl] = React.useState("");
   const [text, setText] = React.useState("");
@@ -138,6 +145,10 @@ export function InputSection({
   // 自动转写态（页面文本太短时触发，非阻塞页面）
   const [transcribing, setTranscribing] = React.useState(false);
   const [transcribeError, setTranscribeError] = React.useState<string | null>(null);
+  // 拆开 message 和 error_key：转写错误 key 用于分类引导（need_login → 提示去配 Cookie）
+  const [transcribeErrorKey, setTranscribeErrorKey] = React.useState<
+    DissectTranscribeResult["error_key"] | null
+  >(null);
   const [transcribed, setTranscribed] = React.useState(false);
 
   // 粘贴时若检测到分享口令里夹着链接，自动抽出 + 闪一下提示
@@ -150,6 +161,7 @@ export function InputSection({
     // 新一轮抓取：清掉上一次的转写态
     setTranscribing(false);
     setTranscribeError(null);
+    setTranscribeErrorKey(null);
     setTranscribed(false);
     try {
       const res = await onFetch(url.trim());
@@ -181,6 +193,7 @@ export function InputSection({
   const runTranscribe = async (u: string) => {
     setTranscribing(true);
     setTranscribeError(null);
+    setTranscribeErrorKey(null);
     try {
       const r = await api.dissectTranscribe(u);
       if (r.ok && r.text) {
@@ -188,11 +201,13 @@ export function InputSection({
         setTranscribed(true);
       } else {
         setTranscribeError(r.error || "转写失败，原因未知");
+        setTranscribeErrorKey(r.error_key ?? null);
       }
     } catch (e) {
       setTranscribeError(
         e instanceof Error ? e.message : "转写请求失败，请稍后重试"
       );
+      setTranscribeErrorKey(null);
     } finally {
       setTranscribing(false);
     }
@@ -204,6 +219,7 @@ export function InputSection({
     setUrlError(null);
     setTranscribing(false);
     setTranscribeError(null);
+    setTranscribeErrorKey(null);
     setTranscribed(false);
   };
 
@@ -445,9 +461,27 @@ export function InputSection({
                         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                         <div className="space-y-1 text-xs leading-relaxed">
                           <div>视频转写失败：{transcribeError}</div>
-                          <div>
-                            建议打开抖音 App，开字幕把完整口播稿复制粘贴到下面的框里再拆解；手动粘贴的文案最完整，拆解质量最高。
-                          </div>
+                          {/* 失败原因 = 需要登录态：直接给「去配置 Cookie」入口，闭环 */}
+                          {transcribeErrorKey === "need_login" ? (
+                            <div className="space-y-2">
+                              <div>
+                                自动转写需要登录态才能下载音频；去「抖音同步」页粘贴一下你的 Cookie，保存后回来再试。
+                              </div>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => router.push("/douyin-sync")}
+                                className="mt-1 h-7 gap-1.5 text-xs"
+                              >
+                                <Cookie className="h-3.5 w-3.5" />
+                                去配置 Cookie
+                              </Button>
+                            </div>
+                          ) : (
+                            <div>
+                              建议打开抖音 App，开字幕把完整口播稿复制粘贴到下面的框里再拆解；手动粘贴的文案最完整，拆解质量最高。
+                            </div>
+                          )}
                         </div>
                       </div>
                     </AlertDescription>
