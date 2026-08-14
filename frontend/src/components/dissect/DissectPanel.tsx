@@ -33,6 +33,7 @@ import { DissectAnalysis } from "@/components/dissect/DissectAnalysis";
 import { MaterialChecklist } from "@/components/dissect/MaterialChecklist";
 import { RewritePreview } from "@/components/dissect/RewritePreview";
 import { TitleSwitcher, type TitleSwitcherItem } from "@/components/dissect/TitleSwitcher";
+import { usePipelinePolling } from "@/lib/usePipelinePolling";
 import { TopicLibraryDialog } from "@/components/dissect/TopicLibraryDialog";
 import { api, friendlyMessage } from "@/lib/api";
 import { queueDraft } from "@/lib/seed";
@@ -360,37 +361,14 @@ export function DissectPanel({ embedded = false }: { embedded?: boolean }) {
     }
   };
 
-  // 就地轮询流水线状态（每 1.5s），对齐热点线 /topic 轮询逻辑
-  const pollInline = React.useCallback(async (taskId: string) => {
-    try {
-      const st = await api.pipelineStatus(taskId);
-      setTask(st);
-      if (st.status === "success" || st.status === "failed") {
-        setProducePhase(st.status === "success" ? "done" : "form");
-        return false;
-      }
-      return true;
-    } catch {
-      return false;
-    }
-  }, []);
-
-  React.useEffect(() => {
-    if (producePhase !== "running" || !task) return;
-    let active = true;
-    const timer = setInterval(async () => {
-      if (!active) return;
-      const cont = await pollInline(task.task_id);
-      if (!cont) {
-        active = false;
-        clearInterval(timer);
-      }
-    }, 1500);
-    return () => {
-      active = false;
-      clearInterval(timer);
-    };
-  }, [producePhase, task, pollInline]);
+  // 就地轮询流水线状态（每 1.5s），对齐热点线 /topic，复用同一轮询钩子
+  usePipelinePolling({
+    taskId: producePhase === "running" && task ? task.task_id : null,
+    onStatus: setTask,
+    onDone: (st) => {
+      setProducePhase(st && st.status === "success" ? "done" : "form");
+    },
+  });
 
   // 日志自动滚动到底（用户手动上滚时暂停）
   React.useEffect(() => {
