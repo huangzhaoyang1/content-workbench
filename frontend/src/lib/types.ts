@@ -1019,3 +1019,42 @@ export interface DouyinSyncImportResult {
   failed: number;
   messages: string[];
 }
+
+// ==========================================================================
+// LLM 调用成本汇总（GET /api/analytics/llm-cost）
+// 数据源：backend/data/llm_usage.jsonl，每次模型调用落一行。
+// ==========================================================================
+
+/** 一个时间桶内的调用量 / token / 费用估算。 */
+export interface LlmCostBucket {
+  calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  /** 单位见 LlmCostSummary.currency（人民币元）。 */
+  cost_est: number;
+}
+
+/** llm_usage.jsonl 里的单条调用记录。 */
+export interface LlmUsageRecord {
+  time: string;
+  module: string;
+  model: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost_est: number;
+  duration_ms: number;
+}
+
+export interface LlmCostSummary {
+  currency: string;
+  note: string;
+  today: LlmCostBucket;
+  week: LlmCostBucket;
+  month: LlmCostBucket;
+  all: LlmCostBucket;
+  /** key 为模块名：hotspot / topic / dissect / ocr_structure / vision。 */
+  by_module: Record<string, LlmCostBucket>;
+  /** 最近 10 条，按时间倒序。 */
+  recent: LlmUsageRecord[];
+}

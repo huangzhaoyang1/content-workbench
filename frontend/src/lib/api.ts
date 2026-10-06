@@ -55,6 +55,7 @@ import type {
   TrashTopic,
   TopicVersionListResult,
   TopicVersionDetail,
+  LlmCostSummary,
 } from "./types";
 
 // 后端地址：两个变量名都支持（NEXT_PUBLIC_API_BASE 是历史名字，
@@ -463,6 +464,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ articles }),
     }),
+
+  /** LLM 调用量与费用估算（今日 / 本周 / 本月 / 累计 + 按模块 + 最近明细）。 */
+  llmCost: () => request<LlmCostSummary>("/api/analytics/llm-cost"),
 
   // ---------- 任务队列 ----------
   getQueue: () => request<QueueSnapshot>("/api/queue"),

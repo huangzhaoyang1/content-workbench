@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Settings, ListChecks, Menu, X } from "lucide-react";
+import { Settings, ListChecks, Menu, X, Coins } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   MarkWorkbench,
@@ -64,6 +64,13 @@ const NAV: NavItem[] = [
     icon: MarkAnalytics,
     desc: "复盘找方向",
     activeWhen: (p) => p === "/analytics" || p.startsWith("/analytics"),
+  },
+  {
+    href: "/llm-cost",
+    label: "调用与成本",
+    icon: Coins,
+    desc: "token 与费用",
+    activeWhen: (p) => p === "/llm-cost" || p.startsWith("/llm-cost"),
   },
   {
     href: "/config",
