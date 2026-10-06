@@ -1547,7 +1547,7 @@ export default function TopicPage() {
                                       </div>
                                     </div>
                                     <div>
-                                      <div className="mb-1 text-muted-foreground">封面右上角期号文字（合集场景可填 "提示词合集"等）</div>
+                                      <div className="mb-1 text-muted-foreground">封面右上角期号文字（合集场景可填 &ldquo;提示词合集&rdquo;等）</div>
                                       <Input
                                         value={coverLabel}
                                         onChange={(e) => setCoverLabel(e.target.value)}
