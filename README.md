@@ -14,8 +14,30 @@
 | 路由模块 | 12 个（11 个已挂载） |
 | 服务层 | 4 个子包 · 27 个模块 |
 | 自动化测试 | 后端 **59 个用例**（10 个文件）+ 前端 Vitest |
-| 前端页面 | 9 个 · 组件 45 个 |
+| 前端页面 | 10 个 · 组件 45 个 |
 | 工程文档 | `docs/` 16 篇 + 部署手册 |
+
+---
+
+## 界面截图
+
+> 均为本地真实运行截图（后端 `127.0.0.1:8000` + 前端 `127.0.0.1:3000`），数据来自实跑记录，未做美化。
+
+**数据分析** —— 导入公众号后台数据后的概览、趋势与三类榜单；表现好的文章可一键加入选题参考。
+
+<img src="docs/screenshots/01-analytics.png" alt="数据分析：概览指标 / 阅读量趋势 / 阅读量 TOP10 / 选题建议" width="820">
+
+**调用与成本** —— 每一次模型调用逐条记账，按今日 / 本周 / 本月 / 累计汇总，并按模块归因（热点搜索 · 选题生成 · 爆款拆解）。
+
+<img src="docs/screenshots/02-llm-cost.png" alt="调用与成本：周期汇总 / 模块分布 / 最近调用明细" width="820">
+
+**爆款拆解** —— 粘贴抖音口播稿，先拆出核心素材，再按「踩坑经历 / 干货总结 / 认知升级」三个角度并行改写；每篇给四维质量评分与按维度分组的改进建议，合规命中会直接拦下。
+
+<img src="docs/screenshots/03-dissect.png" alt="即时拆解：素材清单 / 三篇改写 / 质量评分 / 候选选题" width="820">
+
+**历史任务** —— 往期产出一览，按期号分页，可按状态与标签筛选，支持复用选题、加入队列与删除。
+
+<img src="docs/screenshots/04-tasks.png" alt="历史任务：总览指标 / 筛选栏 / 任务列表" width="820">
 
 ---
 
@@ -49,7 +71,7 @@
 |---|---|
 | **数据分析** | 上传 CSV/Excel → 列名自动识别 → 数值与日期归一 → 概览 / 趋势 / 三类榜单（阅读榜、分享榜、在看率榜）→ 选题建议 |
 | **截图识别导入** | 公众号后台截图 → OCR → 人工确认对话框 → 按「标题 + 日期」去重合并入库 → 单条可删 |
-| **LLM 用量与成本** | 所有大模型调用统一入口记账：`{time, module, model, prompt_tokens, completion_tokens, cost_est, duration_ms}`；按今日 / 本周 / 本月 / 全部汇总，并按模块归因 |
+| **LLM 用量与成本** | 所有大模型调用统一入口记账：`{time, module, model, prompt_tokens, completion_tokens, cost_est, duration_ms}`；按今日 / 本周 / 本月 / 全部汇总，并按模块归因；前端「调用与成本」页（`/llm-cost`）直接读这份汇总，不做二次统计 |
 | **API 额度管控** | 按自然日重置的搜索额度计数，返回 `used / limit / remaining / exhausted`，调用前先判断余量 |
 
 ### 系统层
@@ -114,9 +136,9 @@
 content-workbench/
 ├── frontend/                        # Next.js 14
 │   ├── src/
-│   │   ├── app/                     # 9 个页面
+│   │   ├── app/                     # 10 个页面
 │   │   │   ├── hotspot/  topic/  dissect/  queue/
-│   │   │   ├── tasks/    analytics/  douyin-sync/  config/
+│   │   │   ├── tasks/    analytics/  douyin-sync/  llm-cost/  config/
 │   │   │   └── layout.tsx
 │   │   ├── components/
 │   │   │   ├── analytics/           # UploadZone · ScreenshotZone · OcrConfirmDialog · RankingTable
@@ -138,7 +160,7 @@ content-workbench/
 │   ├── eval/                        # 评测集与评测脚本（eval_questions.json + eval_run.py + result/）
 │   ├── tests/                       # 10 个文件 · 59 个用例
 │   └── data/                        # 运行时数据（已在 .gitignore 中屏蔽，仅保留 .gitkeep）
-├── docs/                            # 16 篇工程文档
+├── docs/                            # 16 篇工程文档 + screenshots/ 功能截图
 ├── analyze_cycle.py                 # 周期运营分析（每 9 天跑一次）
 ├── sync_obsidian.py                 # 文章与数据归档到 Obsidian
 ├── smoke_test.py                    # 接口冒烟测试（自还原，不留脏数据）
