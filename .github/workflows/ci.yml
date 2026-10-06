@@ -64,3 +64,9 @@ jobs:
 
       - name: 运行前端测试
         run: npm run test
+
+      # 这一步很关键：`next build` 会把 ESLint 和类型检查一起跑一遍。
+      # 之前 CI 只跑 tsc + vitest，漏掉了 ESLint，于是 topic/page.tsx 里一个
+      # 没转义的引号让 Vercel 的生产构建一直失败，本地却毫无察觉。
+      - name: 生产构建
+        run: npm run build
