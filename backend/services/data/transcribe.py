@@ -368,6 +368,8 @@ def _probe_duration(audio_path: str) -> float | None:
             [ffmpeg, "-i", audio_path],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=30,
         )
         out = r.stderr or r.stdout
@@ -411,7 +413,10 @@ def _to_wav(audio_path: str, workdir: Path) -> tuple[str | None, str | None]:
         wav,
     ]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=_CONVERT_TIMEOUT_SEC)
+        r = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=_CONVERT_TIMEOUT_SEC,
+        )
         if r.returncode != 0:
             log.warning("ffmpeg 转码失败，退回原音频：%s", (r.stderr or "")[-300:])
             return audio_path, None

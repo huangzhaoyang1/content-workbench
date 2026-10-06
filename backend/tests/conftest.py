@@ -10,7 +10,16 @@ from __future__ import annotations
 import atexit
 import os
 import shutil
+import sys
 import tempfile
+from pathlib import Path
+
+# 让 backend/tests/ 下的测试能直接 `from services.xxx import ...`：
+# pytest.ini 的 pythonpath=.. 只把 content-workbench/ 放进 path，
+# services 在 backend/ 下，需要额外把 backend/ 也放进 path。
+_BACKEND_DIR = str(Path(__file__).resolve().parent.parent)
+if _BACKEND_DIR not in sys.path:
+    sys.path.insert(0, _BACKEND_DIR)
 
 _TMP = tempfile.mkdtemp(prefix="wb_test_")
 DATA_DIR = os.path.join(_TMP, "data")

@@ -220,7 +220,11 @@ def _probe_deepseek(ds: dict) -> tuple[bool, str]:
 def _search_serpapi(api_key: str, keywords: list[str], max_hours: int, daily_limit: int) -> list[dict]:
     """调用 SerpAPI(google_news)返回归一化热点列表。"""
     import requests  # 懒加载
-    q = " OR ".join(keywords) if keywords else "AI 大模型"
+    # 默认查询词贴合账号定位（非技术小白学 AI / 搞副业），避免搜出与定位无关的泛新闻
+    if keywords:
+        q = " OR ".join(keywords)
+    else:
+        q = "AI 副业 OR AI 工具 OR AI 学习 OR 大模型 普通人"
     params = {
         "engine": "google_news",
         "q": q,

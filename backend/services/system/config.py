@@ -223,12 +223,15 @@ def _clear_readonly(path: Path) -> None:
         pass
 
 
-def atomic_write_json(path: Path, payload: dict, retries: int = 4) -> None:
+def atomic_write_json(path: Path, payload: dict, retries: int = 6) -> None:
     """原子写 JSON：先写同目录临时文件，再 os.replace 覆盖。
 
     Windows 上文件常被杀软/同步盘/编辑器短暂占用，直接 open(mode='w') 会抛
     PermissionError。这里用「临时文件 + 替换 + 指数退避重试」把瞬时占用扛过去，
     同时保证写一半崩溃时原文件不被截断。
+
+    额外对 Windows PermissionError 做 remove+rename 兜底：某些情况下文件句柄
+    不允许 MOVEFILE_REPLACE_EXISTING，但允许先删除再重命名。
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(payload, ensure_ascii=False, indent=2)
@@ -238,7 +241,13 @@ def atomic_write_json(path: Path, payload: dict, retries: int = 4) -> None:
         try:
             _clear_readonly(path)
             tmp.write_text(text, encoding="utf-8")
-            os.replace(tmp, path)          # 同盘原子替换
+            try:
+                os.replace(tmp, path)          # 同盘原子替换
+            except PermissionError:
+                # Windows 兜底：先删目标再重命名，偶尔能绕过只读/占用句柄
+                if path.exists():
+                    path.unlink()
+                os.rename(tmp, path)
             return
         except PermissionError as e:
             last_err = e
@@ -250,7 +259,7 @@ def atomic_write_json(path: Path, payload: dict, retries: int = 4) -> None:
                     tmp.unlink()
                 except Exception:
                     pass
-        time.sleep(0.15 * (2 ** i))        # 0.15s / 0.3s / 0.6s / 1.2s
+        time.sleep(0.15 * (2 ** i))        # 0.15s / 0.3s / 0.6s / 1.2s / 2.4s / 4.8s
     raise ConfigWriteError(
         f"配置写入失败：{path}（{type(last_err).__name__}）。"
         "请确认文件未被其他程序（编辑器/同步盘/杀毒软件）占用或设为只读。"
