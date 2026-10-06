@@ -82,12 +82,12 @@
 
 ## 9. 评估基线（eval）
 
-- **结论：FAIL（未实现）**
+- **结论：PASS（已实现）**
 - **证据**：
   - `backend/eval/eval_questions.json` 存在：20 道题，id 1–20，分 4 类各 5 道（dissect / topic / hotspot / retrieval_history）。
-  - `backend/eval/eval_run.py` → **不存在**；`backend/eval/result/` → **不存在**。
-  - `backend/eval/README.md` 明确写「执行脚本待实现」，TODO 列表含 `run_eval.py`。
-- **备注**：问题集已就绪，但**没有执行器、没有结果目录**，评估流程无法跑起来；属于「基线已定义、runner 未实现」。
+  - `backend/eval/eval_run.py` → **存在**；`backend/eval/result/` → **存在**（含 `_summary.json` 与各类别单题结果）。
+  - `backend/eval/README.md` 描述评测集、执行器与结果目录的用法。
+- **备注**：问题集、执行器（`eval_run.py`）与结果目录（`result/`）均已就绪，评测流程可跑通；当前基线见 `docs/eval-baseline-report.md`。
 
 ## 10. 外部流水线提示词快照
 

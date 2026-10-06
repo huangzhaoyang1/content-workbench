@@ -22,6 +22,8 @@
 
 ## 2. 基线结果
 
+> 注：本节为**较早一次运行**的结果（该次 dissect 记为 skipped）；最新一次运行见文末 **§6「当前基线与已知弱项」**。两节数字口径不同，属正常。
+
 | 维度 | 数值 |
 |---|---|
 | 总题数 | 20 |
@@ -84,3 +86,35 @@
 - 按各服务真实输出重写 expected_keywords（或改为「结构断言」而非关键词）；
 - 配置 key/search_api 后重跑，得到有意义的 hotspot 基线；
 - 充实历史索引数据。
+
+---
+
+## 6. 当前基线与已知弱项
+
+> 本节为 2026-08-12 的重跑结果，数据来自 `backend/eval/result/_summary.json`（`generated_at: 2026-08-12T07:46:09`），未做任何美化。
+> 与上方 §2 的早期一次运行口径不同（该次 dissect 记为 skipped，本次记为 errored），**以本节为准**。
+
+| 指标 | 数值 |
+|---|---|
+| 总题数 | 20 |
+| 尝试 attempted | 15 |
+| 报错 errored | 5 |
+| 通过 passed | 5 |
+| 失败 failed | 10 |
+| **整体准确率** | **33.3%**（20 题中 attempted 15 / errored 5 / passed 5 / failed 10）|
+
+### 分类准确率
+
+| category | 准确率 | passed / attempted |
+|---|---|---|
+| topic | **0.8** | 4 / 5 |
+| hotspot | **0.2** | 1 / 5 |
+| retrieval_history | **0.0** | 0 / 5 |
+| dissect | — | 5 题全部 errored（未进入判定）|
+
+**最弱类别**：`retrieval_history`（0.0）。
+
+### 已知弱项说明
+
+- **5 道 dissect 题 errored**：均为 `DissectError: 爆款拆解需要 DeepSeek 密钥...`。属**环境问题**（评测环境未配置 DeepSeek 密钥），**非代码缺陷**；配置密钥后重跑即可进入判定。
+- **retrieval_history 为 0 是已知弱项**：该类别准确率基于关键词命中判定，而该判定**对生成式输出偏严** —— 生成的文本与 `expected_keywords` 常语义等价但字面不同，按关键词比对时全部未命中。属判定口径问题，非检索能力缺失。

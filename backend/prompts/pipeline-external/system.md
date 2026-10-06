@@ -1,5 +1,5 @@
 # 外部流水线 LLM 系统提示词快照（来自 side-hustle/scripts）
-# 来源项目：C:\Users\黄朝扬\WorkBuddy\2026-07-28-10-03-37\side-hustle
+# 来源项目：<源项目已脱敏>
 # 提取方式：AST 扫描 generate_issue.py / writer.py；run_pipeline.py 仅编排、无提示词
 # 提取时间：2026-08-11 22:16:14
 #

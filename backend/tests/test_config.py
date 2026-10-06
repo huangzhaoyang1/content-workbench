@@ -74,9 +74,10 @@ def test_settings_falls_back_to_config_project_root():
         env["WORKBENCH_DATA_DIR"] = data_dir
         env.pop("STREAMLIT_PROJECT_ROOT", None)
 
+        repo_root = Path(__file__).resolve().parents[2]
         code = (
             "import sys; "
-            "sys.path.insert(0, r'C:\\\\Users\\\\黄朝扬\\\\WorkBuddy\\\\content-workbench'); "
+            f"sys.path.insert(0, r'{repo_root}'); "
             "from backend.services.system import config; "
             "print('STREAMLIT_ROOT=', config.settings.streamlit_root); "
             "print('PIPELINE_AVAILABLE=', config.settings.pipeline_available)"

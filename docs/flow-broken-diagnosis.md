@@ -127,7 +127,7 @@
   "status": "failed",
   "issue": 99004,
   "task_id": "1d95e92bbd92",
-  "error": "[2026-08-12 20:47:13] 已写 result.json：C:\\Users\\黄朝扬\\WorkBuddy\\2026-07-28-10-03-37\\side-hustle\\data\\issues\\99004\\result.json",
+  "error": "[2026-08-12 20:47:13] 已写 result.json：<源项目已脱敏>\\data\\issues\\99004\\result.json",
   "created_at": "2026-08-12 20:46:17",
   "started_at": "2026-08-12 20:46:59",
   "finished_at": "2026-08-12 20:47:15"
@@ -139,7 +139,7 @@
   "status": "failed",
   "issue": 99005,
   "task_id": "5bd1dd09140b",
-  "error": "[2026-08-12 20:47:28] 已写 result.json：C:\\Users\\黄朝扬\\WorkBuddy\\2026-07-28-10-03-37\\side-hustle\\data\\issues\\99005\\result.json",
+  "error": "[2026-08-12 20:47:28] 已写 result.json：<源项目已脱敏>\\data\\issues\\99005\\result.json",
   "created_at": "2026-08-12 20:46:36",
   "started_at": "2026-08-12 20:47:15",
   "finished_at": "2026-08-12 20:47:29"
@@ -153,12 +153,12 @@
 ```
 [2026-08-12 20:46:59] === pipeline start ===
 [2026-08-12 20:46:59] 手动主题模式：topic='为什么中国大模型便宜又好用？' angle='大模型降本与商业化拐点……' platform=wechat style='' word_count=''（跳过发布日校验）
-[2026-08-12 20:46:59] step1: generate_issue.py (topic mode) -> C:\Users\黄朝扬\WorkBuddy\2026-07-28-10-03-37\side-hustle\data\issues\99004\article.md
+[2026-08-12 20:46:59] step1: generate_issue.py (topic mode) -> <源项目已脱敏>\data\issues\99004\article.md
 [2026-08-12 20:47:12] step1 OK: 主题草稿已生成
-[2026-08-12 20:47:13] 封面已生成（主题=概念学习，期号标识=第3期）：C:\Users\黄朝扬\WorkBuddy\2026-07-28-10-03-37\side-hustle\data\cover_auto.png
-[2026-08-12 20:47:13] 推送草稿箱：C:\Users\黄朝扬\AppData\Local\Programs\Python\Python312\python.exe C:\Users\黄朝扬\WorkBuddy\2026-07-28-10-03-37\side-hustle\scripts\publish_to_wechat.py … --new --cover …
+[2026-08-12 20:47:13] 封面已生成（主题=概念学习，期号标识=第3期）：<源项目已脱敏>\data\cover_auto.png
+[2026-08-12 20:47:13] 推送草稿箱：<Python 安装目录>\python.exe <源项目已脱敏>\scripts\publish_to_wechat.py … --new --cover …
 [2026-08-12 20:47:13] 推送失败：publish_to_wechat.py exited 1
-[2026-08-12 20:47:13] 已写 result.json：C:\Users\黄朝扬\WorkBuddy\2026-07-28-10-03-37\side-hustle\data\issues\99004\result.json
+[2026-08-12 20:47:13] 已写 result.json：<源项目已脱敏>\data\issues\99004\result.json
 ```
 
 99005 同链路（20:47:15 → 20:47:29），过程完全一致：`step1 OK` → `封面已生成` → `推送失败：publish_to_wechat.py exited 1`。

@@ -191,26 +191,26 @@
 ## 六、被引用文件清单（绝对路径）
 
 **前端**
-- `C:/Users/黄朝扬/WorkBuddy/content-workbench/frontend/src/app/topic/page.tsx`（基准）
-- `C:/Users/黄朝扬/WorkBuddy/content-workbench/frontend/src/app/hotspot/page.tsx`（素材来源入口）
-- `C:/Users/黄朝扬/WorkBuddy/content-workbench/frontend/src/app/dissect/page.tsx`（抖音线主页）
-- `C:/Users/黄朝扬/WorkBuddy/content-workbench/frontend/src/components/dissect/DissectPanel.tsx`（抖音线操作栏/衔接）
-- `C:/Users/黄朝扬/WorkBuddy/content-workbench/frontend/src/components/dissect/RewritePreview.tsx`
-- `C:/Users/黄朝扬/WorkBuddy/content-workbench/frontend/src/components/dissect/MaterialChecklist.tsx`
-- `C:/Users/黄朝扬/WorkBuddy/content-workbench/frontend/src/components/dissect/DissectAnalysis.tsx`
-- `C:/Users/黄朝扬/WorkBuddy/content-workbench/frontend/src/components/tasks/ConfirmPublishDialog.tsx`（三步发布弹窗）
-- `C:/Users/黄朝扬/WorkBuddy/content-workbench/frontend/src/lib/api.ts`
-- `C:/Users/黄朝扬/WorkBuddy/content-workbench/frontend/src/lib/types.ts`
-- `C:/Users/黄朝扬/WorkBuddy/content-workbench/frontend/src/lib/seed.ts`（queueDraft）
+- `<repo-root>/frontend/src/app/topic/page.tsx`（基准）
+- `<repo-root>/frontend/src/app/hotspot/page.tsx`（素材来源入口）
+- `<repo-root>/frontend/src/app/dissect/page.tsx`（抖音线主页）
+- `<repo-root>/frontend/src/components/dissect/DissectPanel.tsx`（抖音线操作栏/衔接）
+- `<repo-root>/frontend/src/components/dissect/RewritePreview.tsx`
+- `<repo-root>/frontend/src/components/dissect/MaterialChecklist.tsx`
+- `<repo-root>/frontend/src/components/dissect/DissectAnalysis.tsx`
+- `<repo-root>/frontend/src/components/tasks/ConfirmPublishDialog.tsx`（三步发布弹窗）
+- `<repo-root>/frontend/src/lib/api.ts`
+- `<repo-root>/frontend/src/lib/types.ts`
+- `<repo-root>/frontend/src/lib/seed.ts`（queueDraft）
 
 **后端**
-- `C:/Users/黄朝扬/WorkBuddy/content-workbench/backend/routers/topic.py`
-- `C:/Users/黄朝扬/WorkBuddy/content-workbench/backend/services/content/topic.py`
-- `C:/Users/黄朝扬/WorkBuddy/content-workbench/backend/routers/dissect.py`
-- `C:/Users/黄朝扬/WorkBuddy/content-workbench/backend/services/content/pipeline.py`
-- `C:/Users/黄朝扬/WorkBuddy/content-workbench/backend/services/system/queue.py`
-- `C:/Users/黄朝扬/WorkBuddy/content-workbench/backend/routers/pipeline.py`
-- `C:/Users/黄朝扬/WorkBuddy/content-workbench/backend/routers/queue.py`
+- `<repo-root>/backend/routers/topic.py`
+- `<repo-root>/backend/services/content/topic.py`
+- `<repo-root>/backend/routers/dissect.py`
+- `<repo-root>/backend/services/content/pipeline.py`
+- `<repo-root>/backend/services/system/queue.py`
+- `<repo-root>/backend/routers/pipeline.py`
+- `<repo-root>/backend/routers/queue.py`
 
 **外部依赖（不在本仓）**
 - `<streamlit_root>/scripts/run_pipeline.py`：写 `PENDING_REVIEW` / 处理 `--no-publish`，本仓只读取其结果。

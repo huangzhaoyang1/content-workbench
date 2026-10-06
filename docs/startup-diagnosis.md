@@ -31,7 +31,7 @@
 |------|----------|
 | `ROOT=...\content-workbench` | ✅ 存在 |
 | `FE_DIR=...\content-workbench\frontend` | ✅ 存在 |
-| `VENV_SCRIPTS\uvicorn.exe`（`C:\Users\黄朝扬\.workbuddy\binaries\python\envs\default\Scripts\uvicorn.exe`） | ✅ 存在（108KB，2025-07-23） |
+| `VENV_SCRIPTS\uvicorn.exe`（`<用户目录>\.workbuddy\binaries\python\envs\default\Scripts\uvicorn.exe`） | ✅ 存在（108KB，2025-07-23） |
 | `node` / `npm` | ✅ `node v22.22.2`、`npm 10.9.7`（managed） |
 | `python` | ✅ `Python 3.13.14`（managed） |
 | `frontend\node_modules`（next/react） | ✅ `.bin/next`、`node_modules/next`、`node_modules/react` 均存在 → 依赖完整 |
@@ -43,7 +43,7 @@
 2. **safe-delete shim 让 `npm run dev` 在清理 `.next` 时崩溃（仅当启动环境注入了 `NODE_OPTIONS` 时）**。
    若用户是从 WorkBuddy 终端 / 被注入该变量的环境启动 bat，`next dev` 启动会递归删 `.next`，shim 拦截 `fs.unlink` 直接抛错退出 → 前端窗口报错、浏览器白屏。
    证据：沙箱内按 bat 原文跑 `npm run dev` 复现该崩溃（堆栈见 §5e）。但 `NODE_OPTIONS` 非持久变量，**纯资源管理器双击通常不命中**——除非启动上下文注入了它。
-3. **bat 无 UTF-8 BOM + 中文路径（`set ROOT=...黄朝扬...`、`cd /d %ROOT%`）**。
+3. **bat 无 UTF-8 BOM + 中文路径（`set ROOT=<中文用户目录>`、`cd /d %ROOT%`）**。
    文件首字节为 `40 65 63`（`@ec`，即 `@echo off`），**无 BOM**。中文路径能否正确解析完全依赖第 2 行的 `chcp 65001`；个别 Windows 版本对「无 BOM 的 UTF-8 批处理」解析异常，会导致 `cd /d` 到乱码路径 → 前后端都起不来 → 无反应/闪退。
    证据：文件确实无 BOM；本机此前能跑（说明多数情况下 OK），属中低概率但真实存在的风险。
 
@@ -54,12 +54,12 @@
 - **54321 端口初始状态**：诊断最初探测时 **FREE（无后端在跑）**。
 - **按 bat 原文手动执行后端命令**（用 bat 解析出的 venv `uvicorn.exe`）：
   ```
-  cd /d C:\Users\黄朝扬\WorkBuddy\content-workbench
+  cd /d <repo-root>
   uvicorn.exe backend.main:app --reload --port 54321
   ```
   真实输出（节选）：
   ```
-  INFO:     Will watch for changes in these directories: ['C:\\Users\\黄朝扬\\WorkBuddy\\content-workbench']
+  INFO:     Will watch for changes in these directories: ['<repo-root>']
   INFO:     Uvicorn running on http://127.0.0.1:54321 (Press CTRL+C to quit)
   INFO:     Started reloader process [260] using WatchFiles
   INFO:     Started server process [5508]
@@ -125,7 +125,7 @@
 - **e. `npm run dev` 报错堆栈（沙箱内原文，按 bat 原文复现）**：
   ```
   ⚠ Port 3000 is in use, trying 3001 instead.
-  Error: [safe-delete] 操作失败: ERROR C:\Users\黄朝扬\WorkBuddy\content-workbench\frontend\.next\app-build-manifest.json: Error during a `trash` operation: Unknown { description: "Some operations were aborted" }
+  Error: [safe-delete] 操作失败: ERROR <repo-root>\frontend\.next\app-build-manifest.json: Error during a `trash` operation: Unknown { description: "Some operations were aborted" }
       at trashViaBinary (...\genie-safe-delete.cjs:270:15)
       at trashItem (...\genie-safe-delete.cjs:283:9)
       at tryTrash (...\genie-safe-delete.cjs:547:5)

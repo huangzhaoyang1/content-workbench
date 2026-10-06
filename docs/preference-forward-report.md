@@ -1,6 +1,6 @@
 # side-hustle 偏好透传实现报告（Segment E）
 
-> 范围：`C:\Users\黄朝扬\WorkBuddy\2026-07-28-10-03-37\side-hustle`
+> 范围：`<源项目已脱敏>`
 > 目标：给出稿函数加 4 个可选偏好参数（style / word_count / domains / forbidden_topics），
 >       由工作台经 `run_pipeline.py` 透传到 `generate_issue.py`，缺省时行为与改造前**完全一致**。
 > 验证方式：离线 harness（不联网、不真实发布、不写 `data/issues`），对比改造后 vs `.bak` 改造前。
