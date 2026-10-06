@@ -1,5 +1,7 @@
 # AI 内容运营工作台（content-workbench）
 
+[![CI](https://github.com/huangzhaoyang1/content-workbench/actions/workflows/ci.yml/badge.svg)](https://github.com/huangzhaoyang1/content-workbench/actions/workflows/ci.yml)
+
 > 面向「AI 内容运营」场景的全栈工作台：**热点发现 → 选题生成 → 内容生产 → 发布归档 → 数据复盘**。
 > 前端 Next.js 14 + TypeScript，后端 FastAPI + Python，配套 **数据统计模块**、**LLM 用量与成本核算模块**、**API 额度管控模块**与 **59 个自动化测试**。
 
