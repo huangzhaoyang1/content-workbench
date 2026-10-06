@@ -35,8 +35,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
+      # 注意：backend/pytest.ini 的 addopts 已经带了 -q，这里不要再加 -q，
+      # 否则变成 -qq，会连「59 passed」这行汇总一起吞掉，CI 日志不好读。
       - name: 运行后端测试
-        run: python -m pytest backend -q
+        run: python -m pytest backend
 
   frontend:
     name: 前端类型检查与测试
