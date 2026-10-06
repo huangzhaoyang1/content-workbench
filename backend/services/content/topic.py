@@ -212,18 +212,44 @@ def data_insight() -> dict:
     }
 
 
+def _read_cycle_insight() -> dict | None:
+    """读 Obsidian 周期分析回流的数据（backend/data/cycle_insight.json）。"""
+    try:
+        from pathlib import Path
+
+        from ..system.config import DATA_DIR
+        p = Path(DATA_DIR) / "cycle_insight.json"
+        import json
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
 def _auto_context() -> tuple[str, list[dict]]:
     """选题生成时自动带上数据洞察，前端不用手动传。"""
     ins = data_insight()
-    if not ins.get("available"):
-        return "", []
-    bits = []
-    if ins.get("title_styles"):
-        top = ins["title_styles"][0]
-        bits.append(f"「{top['name']}」标题平均 {top['avg_reads']} 阅读，表现最好")
-    if ins.get("advice"):
-        bits.append(ins["advice"][0])
-    return " ；".join(bits), list(ins.get("directions") or [])
+    bits: list[str] = []
+    dirs = list(ins.get("directions") or [])
+    if ins.get("available"):
+        if ins.get("title_styles"):
+            top = ins["title_styles"][0]
+            bits.append(f"「{top['name']}」标题平均 {top['avg_reads']} 阅读，表现最好")
+        if ins.get("advice"):
+            bits.append(ins["advice"][0])
+    # 周期洞察（Obsidian 周期分析报告回流）：最近 9 天方向表现 + 最高阅读标题
+    cycle = _read_cycle_insight()
+    if cycle:
+        parts: list[str] = []
+        for name in ("学", "用", "赚"):
+            d = (cycle.get("directions") or {}).get(name)
+            if d and d.get("avg_reads") is not None:
+                parts.append(f"「{name}」方向均阅读 {d['avg_reads']}")
+        if parts:
+            bits.append("最近周期：" + "、".join(parts))
+        tops = cycle.get("top_titles") or []
+        if tops and tops[0].get("title"):
+            bits.append(f"近期最高阅读：《{tops[0]['title']}》（{tops[0].get('reads')} 阅读）")
+    return " ；".join(b for b in bits if b), dirs
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +320,22 @@ def _generate_llm(
         )
 
         user_parts: list[str] = []
+        # 账号定位 + 三方向硬约束：相关性闸门的依据，热点只有能归入三方向才可用
+        user_parts.append(
+            "【账号定位】非技术小白跟扬一起学 AI、一起搞副业。账号只有三个内容方向："
+            "学（AI 学习方法/认知/踩坑）、用（AI 工具/实操/教程）、赚（AI 副业/变现/省钱）。"
+            "每条选题必须归入其中一个方向；归不进去的选题不要写。"
+        )
+        # 今日方向：学/用/赚 三天轮换，当天主打该方向，保证日更节奏
+        from .content_direction import today_direction, DIRECTION_DESC
+
+        direction = today_direction()
+        user_parts.append(
+            f"【今日方向】今天是「{direction}」方向日（学/用/赚三天轮换，"
+            f"「{direction}」= {DIRECTION_DESC[direction]}）。"
+            f"选题里优先出 2~3 条「{direction}」方向的，其余两个方向各出 1 条左右，"
+            "让当天主打方向明确、不跑偏。"
+        )
         if hotspots:
             hs = "\n".join(
                 f"- 《{h.get('title', '')}》(来源:{h.get('source') or '未知来源'})"
@@ -344,6 +386,7 @@ def _generate_llm(
             if not t or len(t) < 6 or t.endswith("篇"):
                 continue
             out.append({
+                "direction": (it.get("direction") or "").strip(),
                 "topic": t,
                 "angle": (it.get("angle") or "").strip(),
                 "structure": (it.get("structure") or "").strip(),
@@ -362,9 +405,12 @@ def _generate_template(
 ) -> list[dict]:
     """纯模板兜底：无外部依赖、稳定，LLM 不可用或返回不达标时启用。"""
     theme_word = pos[:18] if pos else "你的账号"
+    # 5 个固定切入角度 → 三方向映射（学/学/用/赚/赚）
+    _ANGLE_DIRECTIONS = ["学", "学", "用", "赚", "赚"]
     topics: list[dict] = []
     for i, (fa, fd) in enumerate(_ANGLES):
         item = {
+            "direction": _ANGLE_DIRECTIONS[i] if i < len(_ANGLE_DIRECTIONS) else "学",
             "topic": f"{theme_word}：{fa}篇",
             "angle": fd,
             "structure": _STRUCTURES[i],
@@ -383,6 +429,7 @@ def _generate_template(
     # 数据分析建议作为额外候选方向追加（不影响前 5 个基础选题）
     for s in (data_suggestions or []):
         topics.append({
+            "direction": "赚",
             "topic": s.get("name", "数据选题建议"),
             "angle": s.get("angle", ""),
             "structure": "数据结论 → 选题方向 → 实操建议",

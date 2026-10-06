@@ -968,6 +968,7 @@ _REWRITE_SYSTEM = _DSECT["_REWRITE_SYSTEM"]
 REWRITE_ANGLES = load_dissect_angles()
 ANGLE_KEYS = tuple(a["key"] for a in REWRITE_ANGLES)
 _REWRITE_USER = _DSECT["_REWRITE_USER"]
+_IMPROVE_USER = _DSECT.get("_IMPROVE_USER") or _REWRITE_USER
 
 
 
@@ -1487,6 +1488,91 @@ def rewrite_one(angle_key: str, raw_text: str, dissect_data: Any = None) -> dict
     )
     return {
         "rewrite": rewrite,
+        "angle_key": angle_key,
+        "model": cfg["model"],
+        "elapsed_sec": round(time.time() - started, 1),
+    }
+
+
+def improve_by_advice(
+    angle_key: str,
+    raw_text: str,
+    current_content: str,
+    advice: list[str],
+    dissect_data: Any = None,
+) -> dict:
+    """按质量诊断的改进建议，在当前正文基础上逐条落实，输出改进后的文章。
+
+    与 rewrite_one 的区别：rewrite_one 是「换个切入点重写」，本文是
+    「保留主体做打磨」——开头、故事线、金句尽量不动，只补建议里指出的短板。
+
+    返回 {rewrite, quality_before, quality_after, angle_key, model, elapsed_sec}，
+    前端据此展示改进前后分数对比。
+    """
+    cfg = _deepseek_cfg()
+    if not cfg["api_key"]:
+        raise DissectError(
+            "按建议改稿需要 DeepSeek 密钥。请到「系统配置 → DeepSeek」填写 API Key 后重试。"
+        )
+    angle = find_angle(angle_key)
+    raw = (raw_text or "").strip()
+    content = (current_content or "").strip()
+    if len(content) < 30:
+        raise DissectError("当前正文缺失或过短，无法按建议改稿。请先完成拆解改写。")
+    if len(raw) < 30:
+        raise DissectError("原始文案丢失或过短，无法按建议改稿。请回到上一步重新拆解。")
+    advice = [a.strip() for a in advice if a and a.strip()]
+    if not advice:
+        raise DissectError("没有收到改进建议，请先对这篇文章跑一次质量诊断再试。")
+
+    started = time.time()
+    # 复用已有拆解结果；没有就重新拆一遍（更慢，但保证素材上下文齐全）
+    data = dissect_data if isinstance(dissect_data, dict) and dissect_data else None
+    if data is None:
+        data = _normalize_dissect(
+            _extract_json(
+                _chat(
+                    cfg,
+                    _DISSECT_SYSTEM,
+                    _DISSECT_USER.format(text=raw),
+                    temperature=0.3,
+                    max_tokens=4000,
+                    timeout=_DISSECT_TIMEOUT,
+                )
+            ),
+            raw,
+        )
+    else:
+        data = _normalize_dissect(data, raw)
+
+    quality_before = score_article(content, titles=None)
+    account, shared = _shared_ctx(data, raw)
+    user_prompt = _IMPROVE_USER.format(
+        angle_label=angle["label"],
+        angle_words=angle["words"],
+        current_content=content,
+        advice_lines="\n".join(f"- {a}" for a in advice),
+    )
+    text_out = _chat(
+        cfg,
+        _REWRITE_SYSTEM.format(
+            account=account,
+            angle_label=angle["label"],
+            angle_persona=angle["persona"],
+            few_shot_examples=_build_few_shot(shared.get("style") or ""),
+        ),
+        user_prompt,
+        # 打磨温度略低于重写，倾向稳定地保留主体、按建议打补丁
+        temperature=0.4,
+        max_tokens=8000,
+        timeout=_REWRITE_TIMEOUT,
+    )
+    rewrite = _normalize_rewrite(_extract_json(text_out), angle)
+    return {
+        "rewrite": rewrite,
+        "quality_before": quality_before,
+        "quality_after": rewrite.get("quality")
+        or score_article(rewrite["content"], titles=rewrite["titles"]),
         "angle_key": angle_key,
         "model": cfg["model"],
         "elapsed_sec": round(time.time() - started, 1),

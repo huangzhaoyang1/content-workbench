@@ -146,23 +146,36 @@ def _load_custom_forbidden_words() -> list[str]:
 
 
 def _check_forbidden_words(content: str) -> list[dict]:
-    """扫描内容中的违禁词，返回命中列表 [{word, category}, ...]。
+    """扫描内容中的违禁词，返回命中列表 [{word, category, line}, ...]。
 
+    line 为命中的正文行号（1 起），方便前端/用户定位修改。
     命中任意词即视为合规风险，调用方据此把评分标记 BLOCK。
     匹配方式：子串包含（与 _FLUFF 一致），大小写敏感、按原文匹配。
     """
     content = content or ""
     hits: list[dict] = []
     seen_pairs: set[tuple[str, str]] = set()
+    lines = content.splitlines()
+
+    def _first_line(word: str) -> int | None:
+        for i, ln in enumerate(lines, 1):
+            if word in ln:
+                return i
+        return None
+
     for category, words in _FORBIDDEN_CATEGORIES:
         for w in words:
-            if w and w in content and (w, category) not in seen_pairs:
+            if not w:
+                continue
+            line_no = _first_line(w)
+            if line_no is not None and (w, category) not in seen_pairs:
                 seen_pairs.add((w, category))
-                hits.append({"word": w, "category": category})
+                hits.append({"word": w, "category": category, "line": line_no})
     for w in _load_custom_forbidden_words():
-        if w and w in content and (w, "用户自定义词") not in seen_pairs:
+        line_no = _first_line(w)
+        if line_no is not None and (w, "用户自定义词") not in seen_pairs:
             seen_pairs.add((w, "用户自定义词"))
-            hits.append({"word": w, "category": "用户自定义词"})
+            hits.append({"word": w, "category": "用户自定义词", "line": line_no})
     return hits
 
 
@@ -367,9 +380,16 @@ def score_article(content: str, *, titles: Any = None) -> dict:
         for tip in tips:
             advice.append(f"[{name}] {tip}")
     if blocked:
-        words_desc = "、".join(h["word"] for h in forbidden[:6])
+        # 违禁词带行号，方便用户定位修改
+        parts: list[str] = []
+        for h in forbidden[:6]:
+            loc = f"第{h['line']}行" if h.get("line") else ""
+            parts.append(f"{h['word']}（{loc}）" if loc else h["word"])
         more = f" 等共 {len(forbidden)} 处" if len(forbidden) > 6 else ""
-        advice.insert(0, f"[合规] 命中违禁词：{words_desc}{more}，已标记 BLOCK，请修改后重新生成")
+        advice.insert(
+            0,
+            f"[合规] 命中违禁词：{'、'.join(parts)}{more}，已标记 BLOCK，请修改后重新生成",
+        )
 
     return {
         "total": total,

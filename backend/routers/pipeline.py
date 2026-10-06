@@ -86,6 +86,12 @@ def pipeline_discard(body: PipelineIssueReq) -> dict:
     return pipeline.discard(body.issue)
 
 
+@router.post("/pipeline/mark-published")
+def pipeline_mark_published(body: PipelineIssueReq) -> dict:
+    """用户在公众号后台已手动发布：把「待审核」标记为已推送（只改本地状态）。"""
+    return pipeline.mark_published(body.issue)
+
+
 @router.get("/pipeline/status/{task_id}")
 def pipeline_status(task_id: str) -> dict:
     """查询任务状态与实时日志。"""

@@ -120,6 +120,35 @@ def rewrite_one(body: RewriteOneReq) -> dict:
         raise HTTPException(status_code=e.status_code, detail=str(e))
 
 
+class RewriteWithAdviceReq(BaseModel):
+    angle_key: str = Field(..., description="pitfall / howto / insight")
+    raw_text: str = Field(..., description="原始口播文案，与首次拆解时保持一致")
+    content: str = Field(..., description="当前正文（要按建议改的文章）")
+    advice: list[str] = Field(default_factory=list, description="质量诊断给出的改进建议")
+    dissect: dict[str, Any] | None = Field(
+        None, description="上一次的拆解结果；不传则重新拆一遍（更慢）"
+    )
+
+
+@router.post("/douyin-dissect/rewrite-with-advice")
+def rewrite_with_advice(body: RewriteWithAdviceReq) -> dict:
+    """按质量诊断的改进建议，在当前正文基础上逐条落实（打磨而非重写），返回改进后的文章。
+
+    返回 {rewrite, quality_before, quality_after, ...}，前端据此展示改进前后分数对比。
+    通常 30-90 秒。
+    """
+    try:
+        return dissect.improve_by_advice(
+            angle_key=body.angle_key,
+            raw_text=body.raw_text,
+            current_content=body.content,
+            advice=body.advice,
+            dissect_data=body.dissect,
+        )
+    except dissect.DissectError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+
+
 @router.get("/douyin-dissect/angles")
 def angles() -> dict:
     """三个改写角度的定义，前端用来渲染标题卡片。"""

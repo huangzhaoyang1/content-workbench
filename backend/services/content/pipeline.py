@@ -294,12 +294,12 @@ def publish(issue: int, cover_label: str = "") -> dict:
     return {"task_id": task_id, "issue": issue}
 
 
-def regenerate_cover(issue: int, cover_label: str = "") -> dict:
+def regenerate_cover(issue: int, cover_label: str = "", theme: str = "") -> dict:
     """仅重画封面（不重写文章、不推送公众号），返回新封面 base64。
 
     cover_label 非空时覆盖默认「第N期」（用户在确认发布对话框实际输入的期号）。
+    theme 非空时覆盖自动选择（用户在 topic 完成页选的主题）。
     同步调用 run_pipeline.py --regenerate-cover；图像生成通常 5-30s，超时 120s 兜底。
-    用于工作台「生成封面预览」按钮实时反映用户输入的封面期号。
     """
     avail = availability()
     if not avail["available"]:
@@ -313,8 +313,13 @@ def regenerate_cover(issue: int, cover_label: str = "") -> dict:
     cmd = [py, str(script), "--issue", str(issue), "--regenerate-cover"]
     if cover_label and cover_label.strip():
         cmd += ["--cover-label", cover_label.strip()]
+    if theme and theme.strip():
+        cmd += ["--theme", theme.strip()]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=120,
+        )
     except subprocess.TimeoutExpired:
         return {"ok": False, "reason": "封面生成超时（>120s）"}
     except Exception as e:  # noqa: BLE001
@@ -342,6 +347,27 @@ def discard(issue: int) -> dict:
         with open(rp, encoding="utf-8") as f:
             data = json.load(f)
         data["draft_status"] = "DISCARDED"
+        with open(rp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return {"ok": True}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "reason": str(e)}
+
+
+def mark_published(issue: int) -> dict:
+    """用户在公众号后台已手动发布：把「待审核」标记为已推送。
+
+    场景：用户在 mp.weixin.qq.com 手动点发布，工作台不知道，导致状态一直挂「待审核」。
+    这个接口只改本地 result.json 的 draft_status，不调微信。
+    """
+    issues_dir = settings.streamlit_root / "data" / "issues" / str(issue)
+    rp = issues_dir / "result.json"
+    if not rp.exists():
+        return {"ok": False, "reason": f"找不到该期 result.json：{rp}"}
+    try:
+        with open(rp, encoding="utf-8") as f:
+            data = json.load(f)
+        data["draft_status"] = "PUSHED_DRAFT"
         with open(rp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         return {"ok": True}

@@ -8,8 +8,28 @@ from pydantic import BaseModel
 
 from ..services.system.config import load_config
 from ..services.content import topic
+from ..services.content.content_direction import (
+    DIRECTION_DESC,
+    DIRECTION_ORDER,
+    next_directions,
+    today_direction,
+)
 
 router = APIRouter(tags=["topic"])
+
+
+@router.get("/topic/today-direction")
+def topic_today_direction() -> dict:
+    """今日该出哪个方向（学/用/赚 三天轮换）及未来 3 天排期。"""
+    from datetime import date
+
+    return {
+        "direction": today_direction(),
+        "desc": DIRECTION_DESC[today_direction()],
+        "order": DIRECTION_ORDER,
+        "today": date.today().isoformat(),
+        "next3": next_directions(3),
+    }
 
 
 class TopicGenerateReq(BaseModel):
