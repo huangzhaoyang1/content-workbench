@@ -37,6 +37,8 @@ import type {
   DissectTranscribeResult,
   DissectRewriteOneReq,
   DissectRewriteOneResult,
+  DissectRewriteWithAdviceReq,
+  DissectRewriteWithAdviceResult,
   DissectSaveTopicReq,
   TopicLibraryItem,
   TopicLibraryListResult,
@@ -256,6 +258,15 @@ export const api = {
     }),
   /** 读历史数据，给出「3 个内容方向 + 3 种标题风格 + 建议」，供选题页顶部展示。 */
   topicDataInsight: () => request<DataInsight>("/api/topic/data-insight"),
+  /** 今日该出哪个方向（学/用/赚 三天轮换） */
+  topicTodayDirection: () =>
+    request<{
+      direction: string;
+      desc: string;
+      order: string[];
+      today: string;
+      next3: Array<[string, string]>;
+    }>("/api/topic/today-direction"),
 
   // ---------- 流水线 ----------
   startPipeline: (payload: {
@@ -277,18 +288,28 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ issue, cover_label: coverLabel }),
     }),
-  /** 仅重画封面（不推送），返回新封面 base64。用于确认发布对话框「生成封面预览」实时反映用户输入的封面期号。 */
-  regenerateCover: (issue: number, coverLabel = "") =>
+  /** 仅重画封面（不推送），返回新封面 base64。coverLabel 为封面右上角期号文字（默认「第N期」），theme 为 4 个固定主题之一（踩坑日记/项目复盘/动手应用/概念学习），留空按标题/期号自动选。 */
+  regenerateCover: (issue: number, coverLabel = "", theme = "") =>
     request<{ ok: boolean; cover_base64?: string; reason?: string; stderr?: string }>(
       "/api/pipeline/regenerate-cover",
       {
         method: "POST",
-        body: JSON.stringify({ issue, cover_label: coverLabel }),
+        body: JSON.stringify({
+          issue,
+          cover_label: coverLabel,
+          theme,
+        }),
       },
     ),
   /** 放弃待审核的某期（只改本地状态，不调微信）。 */
   discardPipeline: (issue: number) =>
     request<{ ok: boolean; reason?: string }>("/api/pipeline/discard", {
+      method: "POST",
+      body: JSON.stringify({ issue }),
+    }),
+  /** 用户在公众号后台已手动发布：标记该期草稿状态为已推送。 */
+  markPipelinePublished: (issue: number) =>
+    request<{ ok: boolean; reason?: string }>("/api/pipeline/mark-published", {
       method: "POST",
       body: JSON.stringify({ issue }),
     }),
@@ -514,6 +535,7 @@ export const api = {
         url: payload.url ?? "",
         text: payload.text ?? "",
         meta: payload.meta ?? null,
+        session_id: payload.session_id ?? "",
       }),
     }),
   /** 只重新生成某一个角度的文章，复用已有拆解结果 */
@@ -526,6 +548,21 @@ export const api = {
         dissect: payload.dissect ?? null,
       }),
     }),
+  /** 按质量诊断的改进建议，在当前正文基础上逐条落实（打磨而非重写） */
+  dissectRewriteWithAdvice: (payload: DissectRewriteWithAdviceReq) =>
+    request<DissectRewriteWithAdviceResult>(
+      "/api/douyin-dissect/rewrite-with-advice",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          angle_key: payload.angle_key,
+          raw_text: payload.raw_text,
+          content: payload.content,
+          advice: payload.advice ?? [],
+          dissect: payload.dissect ?? null,
+        }),
+      }
+    ),
   dissectSaveTopic: (payload: DissectSaveTopicReq) =>
     request<{ ok: boolean; item: TopicLibraryItem; total: number }>(
       "/api/douyin-dissect/save-topic",

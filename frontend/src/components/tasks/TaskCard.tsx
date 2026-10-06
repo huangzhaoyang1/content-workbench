@@ -7,6 +7,7 @@ import {
   Eye,
   ListPlus,
   Lightbulb,
+  Send,
   XCircle,
   HelpCircle,
   Trash2,
@@ -66,6 +67,8 @@ interface TaskCardProps {
   onReuse: (task: HistoryTask) => void;
   onEnqueue: (task: HistoryTask) => void;
   onDelete: (task: HistoryTask) => Promise<void>;
+  /** 待审核卡片一键直接打开 ConfirmPublishDialog（跳过详情弹窗） */
+  onConfirmPublish?: (task: HistoryTask) => void;
   enqueuing?: boolean;
   selected?: boolean;
   onToggle?: (issue: number) => void;
@@ -78,6 +81,7 @@ export function TaskCard({
   onReuse,
   onEnqueue,
   onDelete,
+  onConfirmPublish,
   enqueuing = false,
   selected = false,
   onToggle,
@@ -172,6 +176,17 @@ export function TaskCard({
           </div>
 
           <div className="flex shrink-0 flex-wrap gap-1.5">
+            {task.draft_status === "PENDING_REVIEW" && onConfirmPublish && (
+              <Button
+                size="xs"
+                variant="default"
+                onClick={() => onConfirmPublish(task)}
+                title="直接进入发布审核（封面期号→预览→发布）"
+              >
+                <Send className="h-3 w-3" />
+                去审核
+              </Button>
+            )}
             <Button size="xs" variant="outline" onClick={() => onView(task.issue)}>
               <Eye className="h-3 w-3" />
               查看详情

@@ -16,6 +16,9 @@ interface RewritePreviewProps {
   /** 只重新生成这一篇 */
   onRegenerate?: () => void;
   regenerating?: boolean;
+  /** 按质量诊断建议一键改稿（保留主体做打磨） */
+  onImproveByAdvice?: () => void;
+  improving?: boolean;
   /** 本篇的历史版本数（含当前） */
   versionCount?: number;
   /** 当前展示的是第几版，0 起 */
@@ -29,6 +32,8 @@ export function RewritePreview({
   onSelectTitle,
   onRegenerate,
   regenerating = false,
+  onImproveByAdvice,
+  improving = false,
   versionCount = 1,
   activeVersion = 0,
   onSelectVersion,
@@ -89,7 +94,13 @@ export function RewritePreview({
       )}
 
       {/* 质量评分 */}
-      {rewrite.quality && <QualityScoreCard quality={rewrite.quality} />}
+      {rewrite.quality && (
+        <QualityScoreCard
+          quality={rewrite.quality}
+          onImprove={onImproveByAdvice}
+          improving={improving}
+        />
+      )}
 
       {/* 本篇的备选标题（二级选择，只影响保存 / 复制时用哪个标题） */}
       <div className="rounded-xl border border-border bg-card p-4 shadow-sm">

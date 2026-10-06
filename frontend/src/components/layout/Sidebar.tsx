@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Settings, Menu, X } from "lucide-react";
+import { Settings, ListChecks, Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   MarkWorkbench,
@@ -50,6 +50,13 @@ const NAV: NavItem[] = [
     icon: MarkHistory,
     desc: "出稿与审核 · 往期",
     activeWhen: (p) => p === "/tasks" || p.startsWith("/tasks"),
+  },
+  {
+    href: "/queue",
+    label: "任务队列",
+    icon: ListChecks,
+    desc: "排队出稿 · 批量生产",
+    activeWhen: (p) => p === "/queue" || p.startsWith("/queue"),
   },
   {
     href: "/analytics",

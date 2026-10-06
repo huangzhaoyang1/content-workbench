@@ -13,6 +13,7 @@ import {
   Newspaper,
   X,
   ListPlus,
+  AlertTriangle,
 } from "lucide-react";
 import { api, friendlyMessage } from "@/lib/api";
 import type { HotspotItem, HotspotSearchResult, SearchQuota } from "@/lib/types";
@@ -318,6 +319,22 @@ export default function HotspotPage() {
                 </Button>
               )}
           </div>
+
+          {(result.origin.includes("示例") || result.origin.includes("mock")) && (
+            <Alert variant="warning" className="animate-fade-in">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle>当前是演示数据，不是真实热点</AlertTitle>
+              <AlertDescription className="flex flex-wrap items-center gap-2">
+                <span>
+                  未配置有效的热点搜索 key（SerpAPI），现在看到的是内置示例。
+                  去「设置」页配置 SerpAPI key 后，这里才会是真实新闻。
+                </span>
+                <LinkButton href="/config" variant="outline" size="sm" className="ml-auto">
+                  去配置
+                </LinkButton>
+              </AlertDescription>
+            </Alert>
+          )}
 
           {result.insight && (
             <Alert variant="info" className="animate-fade-in">

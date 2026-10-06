@@ -44,6 +44,8 @@ interface TaskDetailDialogProps {
   onOpenDir: () => void;
   onConfirmPublish: () => void;
   onDiscard: () => void;
+  /** 已在公众号后台手动发布：标记草稿状态为已推送 */
+  onMarkPublished?: () => void;
   onTagsSaved?: (issue: number) => void;
 }
 
@@ -69,6 +71,7 @@ export function TaskDetailDialog({
   onOpenDir,
   onConfirmPublish,
   onDiscard,
+  onMarkPublished,
   onTagsSaved,
 }: TaskDetailDialogProps) {
   const { toast } = useToast();
@@ -157,7 +160,13 @@ export function TaskDetailDialog({
               <Button
                 size="sm"
                 onClick={() => onRegenerate("now")}
+                variant={detail.quality?.block ? "destructive" : "default"}
                 disabled={regenerating || !detail.topic}
+                title={
+                  detail.quality?.block
+                    ? "命中违禁词，建议立即重新生成一版再审核"
+                    : "立刻跑一次流水线重新生成（会覆盖当前产出）"
+                }
               >
                 <RefreshCw className="h-4 w-4" />
                 立即重新生成
@@ -179,7 +188,11 @@ export function TaskDetailDialog({
                 <div className="mt-2">
                   {detail.quality ? (
                     <>
-                      <QualityScoreCard quality={detail.quality} />
+                      <QualityScoreCard
+                        quality={detail.quality}
+                        onImprove={() => onRegenerate("now")}
+                        improveLabel="按建议重新生成"
+                      />
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <Badge
                           variant={
@@ -207,11 +220,17 @@ export function TaskDetailDialog({
                                 key={i}
                                 variant="outline"
                                 className="text-[10px]"
+                                title={h.line ? `命中正文第 ${h.line} 行` : undefined}
                               >
                                 {h.word}
                                 <span className="ml-1 text-muted-foreground">
                                   {h.category}
                                 </span>
+                                {h.line != null && (
+                                  <span className="ml-1 text-destructive">
+                                    第{h.line}行
+                                  </span>
+                                )}
                               </Badge>
                             ))}
                           </div>
@@ -225,7 +244,16 @@ export function TaskDetailDialog({
                   )}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <Button size="sm" onClick={onConfirmPublish} disabled={reviewBusy}>
+                  <Button
+                    size="sm"
+                    onClick={onConfirmPublish}
+                    disabled={reviewBusy || detail.quality?.block}
+                    title={
+                      detail.quality?.block
+                        ? "已命中违禁词（BLOCK），不能直接发布。请先用「立即重新生成」或到拆解页按建议改稿"
+                        : undefined
+                    }
+                  >
                     {reviewBusy ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
@@ -233,6 +261,12 @@ export function TaskDetailDialog({
                     )}
                     确认发布
                   </Button>
+                  {detail.quality?.block && (
+                    <span className="flex items-center gap-1 text-xs text-destructive">
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      BLOCK：命中违禁词，已禁用「确认发布」
+                    </span>
+                  )}
                   <Button
                     size="sm"
                     variant="ghost"
@@ -246,6 +280,17 @@ export function TaskDetailDialog({
                     )}
                     放弃
                   </Button>
+                  {onMarkPublished && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={onMarkPublished}
+                      disabled={reviewBusy}
+                      title="已在公众号后台手动发布：把该期标记为已推送，不再挂在待审核"
+                    >
+                      已手动发布
+                    </Button>
+                  )}
                 </div>
               </div>
             )}
@@ -398,9 +443,14 @@ export function TaskDetailDialog({
               <FileText className="h-4 w-4" />
               文章预览
               {detail.article_preview && (
-                <Badge variant="muted" className="ml-auto">
-                  {detail.article_preview.length} 字符
-                </Badge>
+                <>
+                  <Badge variant="muted" className="ml-auto">
+                    {detail.article_preview.length} 字符
+                  </Badge>
+                  <Badge variant="muted" title="违禁词行号按完整正文计算，预览可能截断">
+                    截断预览
+                  </Badge>
+                </>
               )}
             </button>
             {showArticle && (

@@ -25,6 +25,9 @@ import {
   Image as ImageIcon,
   FolderOpen,
   RotateCw,
+  Pencil,
+  CalendarDays,
+  RefreshCw,
 } from "lucide-react";
 import { api, friendlyMessage } from "@/lib/api";
 import { topicSeeds } from "@/lib/seed";
@@ -319,6 +322,49 @@ export default function TopicPage() {
   const [hotspots, setHotspots] = useState<HotspotItem[]>([]);
   const [seeds, setSeeds] = useState<TopicSeed[]>([]);
   const [topics, setTopics] = useState<TopicCandidate[]>([]);
+  /** 选题标题本地编辑覆盖：key = 原标题，value = 用户改后的标题（避免整批重生成） */
+  const [editedTopicMap, setEditedTopicMap] = useState<Record<string, string>>({});
+  /** 当前正在内联编辑的选题索引（-1 表示都不在编辑态） */
+  const [editingTopicIdx, setEditingTopicIdx] = useState<number>(-1);
+
+  // 封面重画表单：主题（4 选 1）+ 封面期号文字
+  const [coverEditorOpen, setCoverEditorOpen] = useState(false);
+  const [coverTheme, setCoverTheme] = useState<string>("");
+  const [coverLabel, setCoverLabel] = useState<string>("");
+  const [regeneratingCover, setRegeneratingCover] = useState(false);
+  const COVER_THEMES = [
+    { key: "踩坑日记", desc: "AI 翻车 / 报错 / debug 场景" },
+    { key: "项目复盘", desc: "成果 / 阶段 / 里程碑" },
+    { key: "动手应用", desc: "教程 / 部署 / 试一把" },
+    { key: "概念学习", desc: "原理 / 入门 / 学习" },
+  ] as const;
+
+  const handleRegenerateCover = async () => {
+    if (!detail?.issue) return;
+    setRegeneratingCover(true);
+    try {
+      const res = await api.regenerateCover(
+        detail.issue,
+        coverLabel.trim(),
+        coverTheme,
+      );
+      if (res.ok && res.cover_base64) {
+        setDetail((prev) =>
+          prev && prev.issue === detail.issue
+            ? { ...prev, cover_base64: res.cover_base64 ?? null }
+            : prev,
+        );
+        toast("封面已重画", "success");
+        setCoverEditorOpen(false);
+      } else {
+        toast(res.reason || "封面重画失败", "error");
+      }
+    } catch (e) {
+      toast(friendlyMessage(e, "封面重画失败"), "error");
+    } finally {
+      setRegeneratingCover(false);
+    }
+  };
   const [picked, setPicked] = useState<TopicCandidate | null>(null);
   const [enqueuing, setEnqueuing] = useState<string | null>(null);
   const [genError, setGenError] = useState<string | null>(null);
@@ -372,6 +418,15 @@ export default function TopicPage() {
 
   // 数据洞察默认收起（候选选题成为主视觉）
   const [insightOpen, setInsightOpen] = useState(false);
+
+  // 今日内容方向（学/用/赚 三天轮换），页面顶部醒目提示
+  const [todayDir, setTodayDir] = useState<{ direction: string; desc: string } | null>(null);
+  useEffect(() => {
+    api
+      .topicTodayDirection()
+      .then((r) => setTodayDir({ direction: r.direction, desc: r.desc }))
+      .catch(() => undefined);
+  }, []);
 
   // 滚动锚点
   const topicsRef = useRef<HTMLDivElement>(null);
@@ -513,6 +568,8 @@ export default function TopicPage() {
         })),
       });
       setTopics(res.topics);
+      setEditedTopicMap({});
+      setEditingTopicIdx(-1);
       setPhase("ready");
       requestAnimationFrame(() =>
         topicsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
@@ -531,7 +588,7 @@ export default function TopicPage() {
     setEnqueuing(t.topic);
     try {
       await api.addQueue({
-        topic: t.topic,
+        topic: editedTopicMap[t.topic] ?? t.topic,
         angle: t.angle,
         extra: t.structure ? `建议结构：${t.structure}` : "",
         source: "topic",
@@ -547,7 +604,7 @@ export default function TopicPage() {
 
   const pickTopic = (t: TopicCandidate) => {
     setPicked(t);
-    setFormTopic(t.topic);
+    setFormTopic(editedTopicMap[t.topic] ?? t.topic);
     setFormAngle(t.angle);
     setFormExtra("");
     setFormErrors({});
@@ -844,6 +901,23 @@ export default function TopicPage() {
       </Card>
 
       {/* 数据洞察（自动读历史数据，无数据则引导去导入） */}
+      {/* 今日内容方向：学/用/赚 三天轮换，提醒当天主打方向 */}
+      {todayDir && (
+        <Card className="mt-5 animate-fade-in border-amber-500/40">
+          <CardContent className="flex flex-wrap items-center gap-2 p-4">
+            <CalendarDays className="h-4 w-4 shrink-0 text-amber-400" />
+            <span className="text-sm font-medium">今日方向</span>
+            <Badge variant="warning" className="text-sm">
+              {todayDir.direction}
+            </Badge>
+            <span className="text-xs text-muted-foreground">{todayDir.desc}</span>
+            <span className="ml-auto hidden text-xs text-muted-foreground sm:inline">
+              学 / 用 / 赚 三天轮换
+            </span>
+          </CardContent>
+        </Card>
+      )}
+
       {insightLoading ? (
         <Card className="mt-5">
           <CardContent className="p-4">
@@ -1048,9 +1122,64 @@ export default function TopicPage() {
                   <div className="min-w-0">
                     <div className="mb-1 flex items-center gap-2">
                       <Badge variant="default" className="shrink-0 text-[10px]">选题</Badge>
+                      {t.direction && (
+                        <Badge
+                          variant={
+                            t.direction === "用"
+                              ? "success"
+                              : t.direction === "赚"
+                                ? "warning"
+                                : t.direction === "学"
+                                  ? "secondary"
+                                  : "muted"
+                          }
+                          className="shrink-0 text-[10px]"
+                        >
+                          {t.direction}
+                        </Badge>
+                      )}
                     </div>
                     <CardTitle className="text-lg font-semibold leading-snug">
-                      {t.topic}
+                      {editingTopicIdx === i ? (
+                        <Input
+                          autoFocus
+                          defaultValue={editedTopicMap[t.topic] ?? t.topic}
+                          className="text-base font-semibold"
+                          onBlur={(e) => {
+                            const v = e.target.value.trim();
+                            setEditedTopicMap((m) => {
+                              const next = { ...m };
+                              if (v && v !== t.topic) next[t.topic] = v;
+                              else delete next[t.topic];
+                              return next;
+                            });
+                            setEditingTopicIdx(-1);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                            else if (e.key === "Escape") setEditingTopicIdx(-1);
+                          }}
+                        />
+                      ) : (
+                        <span className="flex items-center gap-2">
+                          <span className={editedTopicMap[t.topic] ? "text-amber-400" : undefined}>
+                            {editedTopicMap[t.topic] ?? t.topic}
+                          </span>
+                          <button
+                            type="button"
+                            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                            onClick={() => setEditingTopicIdx(i)}
+                            title="编辑这条选题的标题（不用整批换一批）"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          {editedTopicMap[t.topic] && (
+                            <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-400">
+                              已改
+                            </span>
+                          )}
+                        </span>
+                      )}
                     </CardTitle>
                   </div>
                   <div className="flex shrink-0 gap-1.5">
@@ -1373,10 +1502,82 @@ export default function TopicPage() {
                               </div>
                               {/* eslint-disable-next-line @next/next/no-img-element */}
                               <img
-                                src={`data:image/png;base64,${detail.cover_base64}`}
+                                src={detail.cover_base64}
                                 alt={`第 ${detail.issue} 期封面`}
                                 className="h-28 w-auto rounded-lg border border-border object-cover"
                               />
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                className="mt-2"
+                                onClick={() => {
+                                  setCoverEditorOpen((v) => !v);
+                                  if (detail.issue) setCoverLabel(`第${detail.issue}期`);
+                                }}
+                                disabled={regeneratingCover}
+                              >
+                                {regeneratingCover ? (
+                                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                ) : (
+                                  <RefreshCw className="mr-1 h-3 w-3" />
+                                )}
+                                重画封面
+                              </Button>
+                              {coverEditorOpen && (
+                                <div className="mt-2 rounded-lg border border-border bg-muted/30 p-3 text-xs">
+                                  <div className="space-y-2">
+                                    <div>
+                                      <div className="mb-1 text-muted-foreground">主题（背景风格）</div>
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {COVER_THEMES.map((t) => (
+                                          <button
+                                            key={t.key}
+                                            type="button"
+                                            onClick={() => setCoverTheme((c) => (c === t.key ? "" : t.key))}
+                                            className={`rounded border px-2 py-1 transition-colors ${
+                                              coverTheme === t.key
+                                                ? "border-primary bg-primary/15 text-primary"
+                                                : "border-border hover:border-primary/50"
+                                            }`}
+                                            title={t.desc}
+                                          >
+                                            {t.key}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <div className="mb-1 text-muted-foreground">封面右上角期号文字（合集场景可填 "提示词合集"等）</div>
+                                      <Input
+                                        value={coverLabel}
+                                        onChange={(e) => setCoverLabel(e.target.value)}
+                                        placeholder={`第${detail.issue}期`}
+                                      />
+                                    </div>
+                                    <div className="flex gap-2">
+                                      <Button
+                                        size="sm"
+                                        onClick={handleRegenerateCover}
+                                        disabled={regeneratingCover}
+                                      >
+                                        {regeneratingCover ? (
+                                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                        ) : (
+                                          <Sparkles className="mr-1 h-3 w-3" />
+                                        )}
+                                        {regeneratingCover ? "重画中…" : "应用"}
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => setCoverEditorOpen(false)}
+                                      >
+                                        取消
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           )}
                           <div className="min-w-0">

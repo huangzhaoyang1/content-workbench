@@ -86,6 +86,7 @@ export function DissectPanel({ embedded = false }: { embedded?: boolean }) {
   const [titles, setTitles] = React.useState<Record<string, string>>({});
   const [activeAngle, setActiveAngle] = React.useState("");
   const [regenKey, setRegenKey] = React.useState("");
+  const [improving, setImproving] = React.useState(false);
 
   const [saving, setSaving] = React.useState(false);
   const [copying, setCopying] = React.useState(false);
@@ -230,6 +231,45 @@ export function DissectPanel({ embedded = false }: { embedded?: boolean }) {
     setActiveVer((prev) => ({ ...prev, [currentKey]: i }));
     const v = versions[currentKey]?.[i];
     if (v) setTitles((prev) => ({ ...prev, [currentKey]: v.titles?.[0] ?? "" }));
+  };
+
+  /** 按质量诊断建议一键改稿：保留当前篇主体做打磨，新版本追加进 versions */
+  const handleImproveByAdvice = async () => {
+    if (!result || !currentKey || !current) return;
+    const advice = current.quality?.advice ?? [];
+    if (!advice.length) {
+      toast("这篇没有可执行的改进建议，先跑一次拆解拿到评分再说", "warning");
+      return;
+    }
+    setImproving(true);
+    const nextIdx = versions[currentKey]?.length ?? 1;
+    try {
+      const res = await api.dissectRewriteWithAdvice({
+        angle_key: currentKey,
+        raw_text: result.raw_text,
+        content: current.content,
+        advice,
+        dissect: result.dissect,
+      });
+      setVersions((prev) => ({
+        ...prev,
+        [currentKey]: [...(prev[currentKey] ?? []), res.rewrite],
+      }));
+      setActiveVer((prev) => ({ ...prev, [currentKey]: nextIdx }));
+      setTitles((prev) => ({ ...prev, [currentKey]: res.rewrite.titles?.[0] ?? "" }));
+      const before = res.quality_before?.total;
+      const after = res.quality_after?.total;
+      const delta =
+        before != null && after != null ? `（${before} → ${after} 分）` : "";
+      toast(
+        `已按建议生成第 ${nextIdx + 1} 版${delta}，耗时 ${res.elapsed_sec}s。点 v1 / v${nextIdx + 1} 对比。`,
+        "success"
+      );
+    } catch (e) {
+      toast(friendlyMessage(e, "按建议改稿失败"), "error");
+    } finally {
+      setImproving(false);
+    }
   };
 
   const handleSaveTopic = async () => {
@@ -526,6 +566,8 @@ export function DissectPanel({ embedded = false }: { embedded?: boolean }) {
                     }
                     onRegenerate={handleRegenerate}
                     regenerating={regenKey === currentKey}
+                    onImproveByAdvice={handleImproveByAdvice}
+                    improving={improving}
                     versionCount={versions[currentKey]?.length ?? 1}
                     activeVersion={activeVer[currentKey] ?? 0}
                     onSelectVersion={handleSelectVersion}

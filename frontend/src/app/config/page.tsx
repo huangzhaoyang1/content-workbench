@@ -259,15 +259,21 @@ export default function ConfigPage() {
                 <Input
                   value={cfg.positioning}
                   onChange={(e) => update({ positioning: e.target.value })}
-                  placeholder="如：AI 副业实战 + 智能体小白教学"
+                  placeholder="如：非技术小白跟扬一起学 AI、一起搞副业"
                 />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  建议与公众号简介一致；此定位会注入选题 / 改写 prompt
+                </p>
               </Field>
               <Field label="文风要求">
                 <Textarea
                   value={cfg.style}
                   onChange={(e) => update({ style: e.target.value })}
-                  placeholder="如：口语化、少术语、带真实踩坑体感"
+                  placeholder="如：真实、有用、可跟；第一人称，像跟朋友聊天"
                 />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  建议填：真实、有用、可跟；第一人称，像跟朋友聊天（当前代码以此兜底）
+                </p>
               </Field>
               <Field label="视觉风格">
                 <Input

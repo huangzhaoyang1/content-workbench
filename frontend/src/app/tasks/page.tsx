@@ -313,13 +313,16 @@ export default function TasksPage() {
 
   /** 确认发布前的二次确认弹窗（让用户手动指定封面期号标识） */
   const [confirmOpen, setConfirmOpen] = useState(false);
+  /** 待审核卡片直接打开 ConfirmPublishDialog 时记录的 issue（避免依赖 detail） */
+  const [confirmIssue, setConfirmIssue] = useState<number | null>(null);
 
   /** 待审核 → 确认发布：推送到公众号并轮询发布任务状态。 */
   const confirmPublish = async (coverLabel = "") => {
-    if (!detail) return;
+    const issue = confirmIssue ?? detail?.issue;
+    if (!issue) return;
     setReviewBusy(true);
     try {
-      const r = await api.publishPipeline(detail.issue, coverLabel);
+      const r = await api.publishPipeline(issue, coverLabel);
       await new Promise<void>((resolve) => {
         pollTimerRef.current = setInterval(async () => {
           try {
@@ -338,7 +341,9 @@ export default function TasksPage() {
       });
       // 轮询期间组件已卸载：不再更新已卸载组件状态 / 弹 toast，防止内存泄漏与控制台报错。
       if (!mountedRef.current) return;
-      await openDetail(detail.issue);
+      setConfirmOpen(false);
+      setConfirmIssue(null);
+      await openDetail(issue);
       toast("已推送到公众号草稿箱", "success");
     } catch (e) {
       toast(friendlyMessage(e, "发布失败"), "error");
@@ -355,6 +360,21 @@ export default function TasksPage() {
       await api.discardPipeline(detail.issue);
       await openDetail(detail.issue);
       toast("已标记为放弃（未推送）", "success");
+    } catch (e) {
+      toast(friendlyMessage(e, "操作失败"), "error");
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
+  /** 用户在公众号后台已手动发布：标记该期草稿状态为已推送，不再挂「待审核」。 */
+  const markPublishedIssue = async () => {
+    if (!detail) return;
+    setReviewBusy(true);
+    try {
+      await api.markPipelinePublished(detail.issue);
+      await openDetail(detail.issue);
+      toast("已标记为已手动发布", "success");
     } catch (e) {
       toast(friendlyMessage(e, "操作失败"), "error");
     } finally {
@@ -406,6 +426,11 @@ export default function TasksPage() {
     ? (data?.tasks ?? []).filter((t) => t.draft_status === "PENDING_REVIEW")
     : (data?.tasks ?? []);
 
+  // 当前页待审核数：用于顶部"立即审核"快捷按钮（点击进入审核模式看全部待审核）
+  const pendingReviewCount = (data?.tasks ?? []).filter(
+    (t) => t.draft_status === "PENDING_REVIEW"
+  ).length;
+
   return (
     <PageShell>
       <PageHeader
@@ -413,6 +438,17 @@ export default function TasksPage() {
         description="往期产出一览。看到跑得好的选题，可以直接复用或再排一期。"
         actions={
           <>
+            {pendingReviewCount > 0 && !review && (
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => router.push("/tasks?review=1")}
+                title="进入审核模式，只看待审核任务并一键发布"
+              >
+                <ShieldCheck className="h-4 w-4" />
+                待审核 {pendingReviewCount} 条 →
+              </Button>
+            )}
             <LinkButton href="/topic" size="sm">
               <FileText className="h-4 w-4" />
               发起出稿
@@ -767,6 +803,10 @@ export default function TasksPage() {
                   onReuse={reuseTopic}
                   onEnqueue={enqueue}
                   onDelete={handleDeleteTask}
+                  onConfirmPublish={(task) => {
+                    setConfirmIssue(task.issue);
+                    setConfirmOpen(true);
+                  }}
                   enqueuing={enqueuingId === t.issue}
                   selected={selected.has(t.issue)}
                   onToggle={toggleSelect}
@@ -890,6 +930,7 @@ export default function TasksPage() {
         onOpenDir={openDir}
         onConfirmPublish={() => setConfirmOpen(true)}
         onDiscard={discardIssue}
+        onMarkPublished={markPublishedIssue}
         onTagsSaved={(issue) => {
           void openDetail(issue);
           void loadTags();
@@ -898,8 +939,11 @@ export default function TasksPage() {
 
       <ConfirmPublishDialog
         open={confirmOpen}
-        issue={detail?.issue ?? 0}
-        onClose={() => setConfirmOpen(false)}
+        issue={confirmIssue ?? detail?.issue ?? 0}
+        onClose={() => {
+          setConfirmOpen(false);
+          setConfirmIssue(null);
+        }}
         onConfirm={confirmPublish}
       />
 

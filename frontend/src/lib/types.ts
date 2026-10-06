@@ -91,6 +91,8 @@ export interface SearchQuota {
 }
 
 export interface TopicCandidate {
+  /** 学 / 用 / 赚（三大内容方向） */
+  direction?: string;
   topic: string;
   angle: string;
   structure: string;
@@ -670,7 +672,7 @@ export interface QualityScore {
   total: number;
   grade: "优秀" | "合格" | "待打磨" | "不合格" | "BLOCK" | string;
   block: boolean;
-  forbidden_words: Array<{ word: string; category: string }>;
+  forbidden_words: Array<{ word: string; category: string; line?: number }>;
   dimensions: QualityDimension[];
   weakest: string;
   advice: string[];
@@ -788,6 +790,8 @@ export interface DissectAnalyzeReq {
   text?: string;
   /** 上一步抓取拿到的 source，用户改过文案时用来保留视频元信息 */
   meta?: DissectSource | null;
+  /** 会话 ID；填了则后端把最近 6 轮对话拼进拆解上下文，并把本次输入输出存回记忆 */
+  session_id?: string;
 }
 
 export interface DissectRewriteOneReq {
@@ -798,6 +802,25 @@ export interface DissectRewriteOneReq {
 
 export interface DissectRewriteOneResult {
   rewrite: RewriteResult;
+  angle_key: string;
+  model: string;
+  elapsed_sec: number;
+}
+
+export interface DissectRewriteWithAdviceReq {
+  angle_key: string;
+  raw_text: string;
+  content: string;
+  advice: string[];
+  dissect?: DissectResult | null;
+}
+
+export interface DissectRewriteWithAdviceResult {
+  rewrite: RewriteResult;
+  /** 改进前打分（对当前正文本地计算） */
+  quality_before: QualityScore;
+  /** 改进后打分（新正文的 quality 字段） */
+  quality_after: QualityScore;
   angle_key: string;
   model: string;
   elapsed_sec: number;
