@@ -129,7 +129,9 @@ export default function QueuePage() {
       }
     };
     void init();
-  }, [load]);
+    // router / toast 都是稳定引用（useRouter 的上下文对象、useToast 里 useCallback 出来的函数），
+    // 放进依赖数组不会让这个初始化 effect 重复执行，只是把 exhaustive-deps 的告警消掉。
+  }, [load, router, toast]);
 
   // 队列在跑的时候自动轮询，跑完自动停
   useEffect(() => {

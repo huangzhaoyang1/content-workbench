@@ -461,7 +461,8 @@ export default function TopicPage() {
       toast(`已从数据分析带入 ${initialSeeds.length} 条选题参考，生成选题时会作为依据`, "info");
     }
     setPhase("ready");
-  }, []);
+    // toast 是 useToast 里 useCallback 出来的稳定引用，加进依赖不会导致重复执行
+  }, [toast]);
 
   // 进来就拉一次数据洞察（没有数据也不报错，只显示引导）
   useEffect(() => {
