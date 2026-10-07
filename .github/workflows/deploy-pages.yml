@@ -1,0 +1,73 @@
+name: Deploy to GitHub Pages
+
+# 触发条件：
+#   - 推 main 就自动发布（和 ci.yml 各跑各的，互不阻塞）
+#   - 也可以在仓库 Actions 页面手动点一下跑（workflow_dispatch）
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# GitHub Pages 官方部署方式需要的三项权限：
+#   contents: read  → 读仓库代码
+#   pages: write    → 写 Pages
+#   id-token: write → 让 deploy-pages 能拿到 OIDC token，向 GitHub 证明"我是这个仓库的工作流"
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一时间只允许一个 Pages 部署在跑。
+# cancel-in-progress 故意设成 false：宁可排队等，也不要中途掐断一次正在进行的发布，
+# 否则可能留下"发到一半"的站点。
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: 构建静态站点
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 安装前端依赖
+        working-directory: frontend
+        run: npm ci
+
+      # 关键一步：注入 basePath。
+      # 这个仓库的 Pages 地址是项目页 https://<用户名>.github.io/content-workbench/，
+      # 也就是站点不在域名根目录，页面里的 JS/CSS 必须挂在 /content-workbench 下面，
+      # 否则浏览器会去域名根找 _next/... ，全部 404、页面白屏。
+      # 本地不设这个变量，所以 `npm run dev` 仍然是干净的 http://localhost:3000/queue。
+      - name: 静态导出（带 Pages 前缀）
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_BASE_PATH: /content-workbench
+        run: npm run build
+
+      # 读取仓库的 Pages 配置（比如站点 base url），必须在打包上传之前跑
+      - uses: actions/configure-pages@v5
+
+      # 把 frontend/out 整个目录打包成 Pages 认识的 artifact
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/out
+
+  deploy:
+    name: 发布到 Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
