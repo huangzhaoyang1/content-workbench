@@ -260,6 +260,20 @@ python smoke_test.py --paid           # 额外真实调用第三方 API 校验 K
 
 ---
 
+## 上手路线
+
+第一次读这个仓库，建议按下面五步走，大约两小时能过一遍：
+
+1. **先把它跑起来** —— 按上面的「快速开始」起后端（`uvicorn backend.main:app --reload --port 8000`）和前端（`npm run dev`），浏览器打开 <http://localhost:3000>。跑起来再读代码，比干读快得多。
+2. **看一张全景图** —— 读本文件「架构」一节，弄清这条主线：页面 → `frontend/src/lib/api.ts`（拼后端地址、统一错误文案）→ 后端 `backend/routers/` → `backend/services/` → 本地 JSON / JSONL / SQLite。
+3. **顺一条完整的业务链读透** —— 推荐最短的「热点搜索」：`frontend/src/app/hotspot/page.tsx` → `backend/routers/hotspot.py` → 对应的 service。走通一条，其余模块结构同构。
+4. **再看两个有设计取舍的模块** —— 「LLM 用量与成本」（所有模型调用走同一个入口记账）和「API 额度管控」（按自然日重置、调用前先判余量）。这两块体现工程判断，面试也最容易被追问。
+5. **最后跑一遍测试并对照 CI** —— `python -m pytest backend -q`、`cd frontend && npm run test`，再对着 [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) 看 CI 卡了哪几道门（类型检查 / 单元测试 / 生产构建）。
+
+> 功能与接口清单见 [`docs/功能与接口速查.md`](./docs/功能与接口速查.md)；部署与运维见 [`部署手册.md`](./部署手册.md)。
+
+---
+
 ## 环境变量
 
 复制 `.env.example` 为 `.env`。真实的 `.env` 已在 `.gitignore` 中屏蔽。
