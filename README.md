@@ -43,6 +43,20 @@
 
 ---
 
+## 在线演示
+
+**<https://huangzhaoyang1.github.io/content-workbench/>**
+
+这是**前端静态演示**：前端用 `output: "export"` 预渲染成纯静态文件，由 GitHub Pages 托管，每次推 `main` 自动构建发布。
+
+- **能看**：10 个页面的完整界面、导航、表单与静态文案，可以点着走一遍「热点 → 选题 → 拆解 → 任务」的流程。
+- **不能看**：**这个地址上没有后端**。所有依赖数据的接口都调不通，页面会弹出「网络连接失败，请检查后端服务是否可用（当前后端：http://localhost:8000）」。这不是页面坏了——静态站点里本来就没有任何服务端逻辑。
+- **想看全部功能**：按下面的「快速开始」在本机把后端跑起来，前端连 `http://localhost:8000` 即可。
+
+> 为什么后端没有一起上线：出稿流水线依赖本机 Python 脚本、yt-dlp、Whisper 与持久化登录态，这部分**设计上就只能在本地跑**；只把只读的数据接口单独上线，对演示完整流程帮助有限，所以这里只发布了前端。
+
+---
+
 ## 解决什么问题
 
 一个人做内容运营，真正的瓶颈不是"写不出"，而是这四件事：
@@ -215,6 +229,26 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 
 后端地址与前端配置的端口**必须一致**，否则页面会因为请求全部失败而显示空白。
 
+**构建与静态预览**：前端配置了 `output: "export"`，`npm run build` 会把页面预渲染成纯静态文件，产物在 `frontend/out/`：
+
+```bash
+cd frontend
+npm run build     # 产物：frontend/out/
+npm start         # 静态服务器预览 out/（等价于 python -m http.server 3000 --directory out）
+```
+
+因为不再有 Node 服务端，`next start` 在静态导出下会直接报错，所以 `npm start` 换成了静态预览。
+
+部署到 GitHub Pages 时地址是**项目页** `https://<用户名>.github.io/content-workbench/`，
+站点不在域名根目录，资源必须挂在 `/content-workbench` 前缀下，否则 `_next/...` 会 404、页面白屏。
+这个前缀只在 CI 构建时注入，本地不设置 → `npm run dev` 仍是干净的 `http://localhost:3000/queue`：
+
+```bash
+# 需要复现线上构建时（Windows 的 Git Bash 要加 MSYS_NO_PATHCONV=1，
+# 否则 /content-workbench 会被 MSYS 当成路径转换成盘符路径）
+MSYS_NO_PATHCONV=1 NEXT_PUBLIC_BASE_PATH=/content-workbench npm run build
+```
+
 ### 运行测试
 
 ```bash
@@ -305,6 +339,7 @@ python smoke_test.py --paid           # 额外真实调用第三方 API 校验 K
 
 ## 已知限制
 
+- **在线演示地址只有前端，没有后端**：GitHub Pages 上托管的是静态导出产物，所有需要数据的接口都不可用（页面会提示后端连接失败）。要看完整功能请在本地跑，见「快速开始」。
 - **云端不能跑完整出稿流水线**：出稿依赖本机 Python 脚本与本地文件，云端没有这些环境。当前处理是**返回人话提示**（并提供 `GET /api/pipeline/availability` 可提前查询），而不是转圈或报 500。
 - **数据落盘在本地 JSON / JSONL / SQLite**：适合单机使用；多实例部署需要换成数据库或对象存储。
 - **暂不支持旧版 `.xls`**：请另存为 `.xlsx` 或 CSV。单文件上限 10 MB。
